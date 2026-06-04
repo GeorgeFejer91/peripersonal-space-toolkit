@@ -31,6 +31,8 @@
       "gain": 1.0
     }
   ],
+  "custom_looming_files": [],
+  "prestimulus_files": [],
   "trajectory": {
     "start_radius_m": 1.1,
     "end_radius_m": 0.1,

@@ -6,7 +6,9 @@ import pytest
 
 from peripersonal_space_toolkit import designer_app
 from peripersonal_space_toolkit.design import (
+    AudioFileSpec,
     default_design,
+    design_from_dict,
     export_protocol_csv,
     export_trajectory_csv,
     load_design,
@@ -30,16 +32,31 @@ def test_default_design_matches_four_second_study5_timing():
 
 def test_design_json_round_trip_and_trajectory_export(tmp_path: Path):
     design = default_design()
+    design.custom_looming_files = [AudioFileSpec("custom pink", "C:/stimuli/custom_pink.wav", 4.0)]
+    design.prestimulus_files = [AudioFileSpec("inhale", "C:/stimuli/inhale.wav", 4.0)]
     design_path = tmp_path / "design.json"
     csv_path = tmp_path / "trajectory.csv"
     save_design(design, design_path)
     loaded = load_design(design_path)
     assert loaded.noises[0].noise_type == "pink"
+    assert loaded.custom_looming_files[0].label == "custom pink"
+    assert loaded.prestimulus_files[0].path.endswith("inhale.wav")
 
     export_trajectory_csv(loaded, csv_path, samples=7)
     text = csv_path.read_text(encoding="utf-8")
     assert "time_s,radius_m,azimuth_deg" in text
     assert len(text.strip().splitlines()) == 8
+
+
+def test_design_loads_string_audio_preload_paths():
+    design = design_from_dict(
+        {
+            "custom_looming_files": ["assets/custom_looming.wav"],
+            "prestimulus_files": ["assets/custom_prestimulus.wav"],
+        }
+    )
+    assert design.custom_looming_files[0].label == "custom_looming"
+    assert design.prestimulus_files[0].target_duration_s == 4.0
 
 
 def test_protocol_summary_and_export_use_repetitions_soas_spatial_values_and_catches(tmp_path: Path):

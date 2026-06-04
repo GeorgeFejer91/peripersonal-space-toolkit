@@ -17,6 +17,13 @@ SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", 
 
 
 @dataclass
+class AudioFileSpec:
+    label: str
+    path: str
+    target_duration_s: float = 4.0
+
+
+@dataclass
 class NoiseDefinition:
     label: str
     noise_type: str
@@ -74,6 +81,8 @@ class StimulusDesign:
     name: str = "Study 5 PPS design"
     sofa_file: str = ""
     noises: list[NoiseDefinition] = field(default_factory=list)
+    custom_looming_files: list[AudioFileSpec] = field(default_factory=list)
+    prestimulus_files: list[AudioFileSpec] = field(default_factory=list)
     trajectory: TrajectorySpec = field(default_factory=TrajectorySpec)
     protocol: ProtocolSpec = field(default_factory=ProtocolSpec)
 
@@ -93,14 +102,28 @@ def design_to_dict(design: StimulusDesign) -> dict[str, Any]:
     return asdict(design)
 
 
+def _audio_file_specs_from_dicts(items: list[Any]) -> list[AudioFileSpec]:
+    specs: list[AudioFileSpec] = []
+    for item in items:
+        if isinstance(item, str):
+            specs.append(AudioFileSpec(label=Path(item).stem, path=item))
+        else:
+            specs.append(AudioFileSpec(**item))
+    return specs
+
+
 def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
     noises = [NoiseDefinition(**item) for item in data.get("noises", [])]
+    custom_looming_files = _audio_file_specs_from_dicts(data.get("custom_looming_files", []))
+    prestimulus_files = _audio_file_specs_from_dicts(data.get("prestimulus_files", []))
     trajectory = TrajectorySpec(**data.get("trajectory", {}))
     protocol = ProtocolSpec(**data.get("protocol", {}))
     return StimulusDesign(
         name=data.get("name", "Study 5 PPS design"),
         sofa_file=data.get("sofa_file", ""),
         noises=noises,
+        custom_looming_files=custom_looming_files,
+        prestimulus_files=prestimulus_files,
         trajectory=trajectory,
         protocol=protocol,
     )
@@ -113,6 +136,22 @@ def load_design(path: Path) -> StimulusDesign:
 def save_design(design: StimulusDesign, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(design_to_dict(design), indent=2), encoding="utf-8")
+
+
+def audio_file_summary(path: Path) -> dict[str, Any]:
+    try:
+        import soundfile as sf
+    except ImportError as exc:
+        raise RuntimeError("Install soundfile to inspect audio durations.") from exc
+
+    info = sf.info(str(path))
+    return {
+        "frames": int(info.frames),
+        "sample_rate": int(info.samplerate),
+        "channels": int(info.channels),
+        "duration_s": float(info.frames / info.samplerate) if info.samplerate else 0.0,
+        "format": info.format,
+    }
 
 
 def validate_design(design: StimulusDesign) -> list[str]:
@@ -128,6 +167,20 @@ def validate_design(design: StimulusDesign) -> list[str]:
             warnings.append(f"Elevation for {noise.label} should be between -90 and 90 degrees.")
         if noise.gain <= 0:
             warnings.append(f"Gain for {noise.label} must be positive.")
+
+    for label, files in [
+        ("custom looming", design.custom_looming_files),
+        ("prestimulus", design.prestimulus_files),
+    ]:
+        for asset in files:
+            if not asset.label.strip():
+                warnings.append(f"A {label} file is missing a label.")
+            if not asset.path.strip():
+                warnings.append(f"{asset.label or label.title()} is missing a file path.")
+            elif not Path(asset.path).expanduser().exists():
+                warnings.append(f"{asset.label} file was not found: {asset.path}")
+            if asset.target_duration_s <= 0:
+                warnings.append(f"{asset.label} target duration must be positive.")
 
     t = design.trajectory
     if t.path_direction not in SUPPORTED_DIRECTIONS:

@@ -40,7 +40,7 @@ To draft variants before generating or piloting them:
 windows\Launch_Stimulus_Designer.bat
 ```
 
-The designer lets you select a SOFA HRIR file, define noise types with azimuth/elevation orientations, tune looming trajectory radius, path direction, path length, and propagation speed, and specify the experiment schedule: repetitions, SOA values, spatial values, respiratory phases, block count, participant count, and catch-trial percentage. Keep the resulting JSON with your protocol materials when running a non-default variant.
+The designer has separate `Stimulus Design` and `Trial Design` tabs. It lets you select a SOFA HRIR file, define noise types with azimuth/elevation orientations, preload custom looming and prestimulus audio files, tune looming trajectory radius, path direction, path length, and propagation speed, and specify the experiment schedule: repetitions, SOA values, spatial values, respiratory phases, block count, participant count, and catch-trial percentage. Use `Save Settings` for local repeated runs, and keep published JSON design files with your protocol materials when running a non-default variant.
 
 ## 4. Run The Experiment
 

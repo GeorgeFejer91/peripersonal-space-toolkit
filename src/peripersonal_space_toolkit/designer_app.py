@@ -8,10 +8,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from .design import (
+    AudioFileSpec,
     NoiseDefinition,
     ProtocolSpec,
     StimulusDesign,
     TrajectorySpec,
+    audio_file_summary,
     default_design,
     export_protocol_csv,
     export_trajectory_csv,
@@ -37,11 +39,13 @@ class StimulusDesignerApp:
         self.design_path = design_path
         self.design = load_design(design_path) if design_path.exists() else default_design()
         self.noises: list[NoiseDefinition] = list(self.design.noises)
+        self.custom_looming_files: list[AudioFileSpec] = list(self.design.custom_looming_files)
+        self.prestimulus_files: list[AudioFileSpec] = list(self.design.prestimulus_files)
         self.templates: list[StudyTemplate] = load_templates(TEMPLATE_DIR)
 
         self.root.title("Peripersonal Space Toolkit - Stimulus Designer")
-        self.root.geometry("1120x760")
-        self.root.minsize(980, 640)
+        self.root.geometry("1180x780")
+        self.root.minsize(1020, 680)
 
         self.name_var = tk.StringVar()
         self.sofa_var = tk.StringVar()
@@ -50,6 +54,10 @@ class StimulusDesignerApp:
         self.noise_azimuth_var = tk.StringVar()
         self.noise_elevation_var = tk.StringVar()
         self.noise_gain_var = tk.StringVar()
+        self.audio_preload_type_var = tk.StringVar(value="Looming")
+        self.audio_preload_label_var = tk.StringVar()
+        self.audio_preload_path_var = tk.StringVar()
+        self.audio_preload_duration_var = tk.StringVar(value="4.0")
         self.template_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready.")
 
@@ -93,12 +101,8 @@ class StimulusDesignerApp:
         header = ttk.LabelFrame(outer, text="Design")
         header.pack(fill="x")
         ttk.Label(header, text="Name").grid(row=0, column=0, sticky="w", padx=6, pady=6)
-        ttk.Entry(header, textvariable=self.name_var, width=32).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Label(header, text="SOFA file").grid(row=0, column=2, sticky="w", padx=6, pady=6)
-        ttk.Entry(header, textvariable=self.sofa_var).grid(row=0, column=3, sticky="ew", padx=6, pady=6)
-        ttk.Button(header, text="Browse", command=self._browse_sofa).grid(row=0, column=4, padx=4, pady=6)
-        ttk.Button(header, text="Validate", command=self._validate_sofa).grid(row=0, column=5, padx=4, pady=6)
-        ttk.Label(header, text="Preload").grid(row=1, column=0, sticky="w", padx=6, pady=6)
+        ttk.Entry(header, textvariable=self.name_var, width=44).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Label(header, text="Preload").grid(row=0, column=2, sticky="w", padx=6, pady=6)
         template_values = [f"{item.title} [{item.verification_status}]" for item in self.templates]
         self.template_combo = ttk.Combobox(
             header,
@@ -106,30 +110,58 @@ class StimulusDesignerApp:
             values=template_values,
             state="readonly",
         )
-        self.template_combo.grid(row=1, column=1, columnspan=4, sticky="ew", padx=6, pady=6)
-        ttk.Button(header, text="Load Template", command=self._load_template_clicked).grid(row=1, column=5, padx=4, pady=6)
-        header.columnconfigure(3, weight=1)
+        self.template_combo.grid(row=0, column=3, sticky="ew", padx=6, pady=6)
+        ttk.Button(header, text="Load Template", command=self._load_template_clicked).grid(row=0, column=4, padx=4, pady=6)
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(3, weight=2)
 
-        body = ttk.PanedWindow(outer, orient="horizontal")
-        body.pack(fill="both", expand=True, pady=(10, 8))
+        notebook = ttk.Notebook(outer)
+        notebook.pack(fill="both", expand=True, pady=(10, 8))
 
-        left = ttk.Frame(body, padding=(0, 0, 8, 0))
-        right = ttk.Frame(body)
-        body.add(left, weight=1)
-        body.add(right, weight=2)
+        stimulus_tab = ttk.Frame(notebook, padding=8)
+        trial_tab = ttk.Frame(notebook, padding=8)
+        notebook.add(stimulus_tab, text="Stimulus Design")
+        notebook.add(trial_tab, text="Trial Design")
 
-        self._build_noise_panel(left)
-        self._build_protocol_panel(left)
-        self._build_trajectory_panel(right)
+        stimulus_body = ttk.PanedWindow(stimulus_tab, orient="horizontal")
+        stimulus_body.pack(fill="both", expand=True)
+        stimulus_left = ttk.Frame(stimulus_body, padding=(0, 0, 8, 0))
+        stimulus_right = ttk.Frame(stimulus_body)
+        stimulus_body.add(stimulus_left, weight=1)
+        stimulus_body.add(stimulus_right, weight=2)
+
+        stimulus_right_split = ttk.PanedWindow(stimulus_right, orient="vertical")
+        stimulus_right_split.pack(fill="both", expand=True)
+        trajectory_frame = ttk.Frame(stimulus_right_split)
+        audio_preload_frame = ttk.Frame(stimulus_right_split)
+        stimulus_right_split.add(trajectory_frame, weight=3)
+        stimulus_right_split.add(audio_preload_frame, weight=2)
+
+        self._build_sofa_panel(stimulus_left)
+        self._build_noise_panel(stimulus_left)
+        self._build_trajectory_panel(trajectory_frame)
+        self._build_audio_preload_panel(audio_preload_frame)
+        self._build_protocol_panel(trial_tab)
 
         footer = ttk.Frame(outer)
         footer.pack(fill="x")
         ttk.Label(footer, textvariable=self.status_var).pack(side="left", fill="x", expand=True)
-        ttk.Button(footer, text="Load", command=self._load_clicked).pack(side="right", padx=4)
-        ttk.Button(footer, text="Save", command=self._save_clicked).pack(side="right", padx=4)
+        ttk.Button(footer, text="Load File", command=self._load_clicked).pack(side="right", padx=4)
+        ttk.Button(footer, text="Save As", command=self._save_clicked).pack(side="right", padx=4)
+        ttk.Button(footer, text="Load Settings", command=self._load_settings_clicked).pack(side="right", padx=4)
+        ttk.Button(footer, text="Save Settings", command=self._save_settings_clicked).pack(side="right", padx=4)
         ttk.Button(footer, text="Export Protocol", command=self._export_protocol_clicked).pack(side="right", padx=4)
         ttk.Button(footer, text="Export Trajectory", command=self._export_trajectory_clicked).pack(side="right", padx=4)
         ttk.Button(footer, text="Check", command=self._check_design).pack(side="right", padx=4)
+
+    def _build_sofa_panel(self, parent: ttk.Frame) -> None:
+        panel = ttk.LabelFrame(parent, text="SOFA / HRIR Source")
+        panel.pack(fill="x", pady=(0, 8))
+        ttk.Label(panel, text="SOFA file").grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        ttk.Entry(panel, textvariable=self.sofa_var).grid(row=0, column=1, sticky="ew", padx=4, pady=8)
+        ttk.Button(panel, text="Browse", command=self._browse_sofa).grid(row=0, column=2, padx=4, pady=8)
+        ttk.Button(panel, text="Validate", command=self._validate_sofa).grid(row=0, column=3, padx=(4, 8), pady=8)
+        panel.columnconfigure(1, weight=1)
 
     def _build_noise_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Noise Types And Orientations")
@@ -177,6 +209,51 @@ class StimulusDesignerApp:
         ttk.Button(buttons, text="Add / Update", command=self._add_or_update_noise).pack(side="left", padx=2)
         ttk.Button(buttons, text="Remove", command=self._remove_noise).pack(side="left", padx=2)
         ttk.Button(buttons, text="Snap To SOFA", command=self._snap_noises).pack(side="left", padx=2)
+
+    def _build_audio_preload_panel(self, parent: ttk.Frame) -> None:
+        panel = ttk.LabelFrame(parent, text="Custom Audio Preloads")
+        panel.pack(fill="both", expand=True, pady=(8, 0))
+
+        self.audio_preload_tree = ttk.Treeview(
+            panel,
+            columns=("type", "label", "target", "path"),
+            show="headings",
+            height=6,
+        )
+        for column, label, width, anchor in [
+            ("type", "Type", 90, "center"),
+            ("label", "Label", 140, "w"),
+            ("target", "Target s", 80, "center"),
+            ("path", "File", 360, "w"),
+        ]:
+            self.audio_preload_tree.heading(column, text=label)
+            self.audio_preload_tree.column(column, width=width, anchor=anchor)
+        self.audio_preload_tree.pack(fill="both", expand=True, padx=8, pady=8)
+        self.audio_preload_tree.bind("<<TreeviewSelect>>", self._audio_preload_selected)
+
+        form = ttk.Frame(panel)
+        form.pack(fill="x", padx=8)
+        for idx, text in enumerate(["Type", "Label", "Target s", "File"]):
+            ttk.Label(form, text=text).grid(row=0, column=idx, sticky="w", padx=3)
+        ttk.Combobox(
+            form,
+            textvariable=self.audio_preload_type_var,
+            values=("Looming", "Prestimulus"),
+            width=12,
+            state="readonly",
+        ).grid(row=1, column=0, sticky="ew", padx=3, pady=4)
+        ttk.Entry(form, textvariable=self.audio_preload_label_var, width=16).grid(row=1, column=1, sticky="ew", padx=3, pady=4)
+        ttk.Spinbox(form, textvariable=self.audio_preload_duration_var, from_=0.1, to=60.0, increment=0.1, width=8).grid(row=1, column=2, sticky="w", padx=3, pady=4)
+        ttk.Entry(form, textvariable=self.audio_preload_path_var).grid(row=1, column=3, sticky="ew", padx=3, pady=4)
+        ttk.Button(form, text="Browse", command=self._browse_audio_preload).grid(row=1, column=4, padx=3, pady=4)
+        form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=3)
+
+        buttons = ttk.Frame(panel)
+        buttons.pack(fill="x", padx=8, pady=(2, 8))
+        ttk.Button(buttons, text="Add / Update", command=self._add_or_update_audio_preload).pack(side="left", padx=2)
+        ttk.Button(buttons, text="Remove", command=self._remove_audio_preload).pack(side="left", padx=2)
+        ttk.Button(buttons, text="Validate File", command=self._validate_audio_preload).pack(side="left", padx=2)
 
     def _build_protocol_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Protocol Schedule")
@@ -272,6 +349,8 @@ class StimulusDesignerApp:
         self.name_var.set(design.name)
         self.sofa_var.set(design.sofa_file)
         self.noises = list(design.noises)
+        self.custom_looming_files = list(design.custom_looming_files)
+        self.prestimulus_files = list(design.prestimulus_files)
         traj = design.trajectory
         for key, var in self.traj_vars.items():
             var.set(str(getattr(traj, key)))
@@ -291,6 +370,7 @@ class StimulusDesignerApp:
         self.pair_spatial_values_var.set(protocol.pair_spatial_values_with_soas)
         self.include_baseline_var.set(protocol.include_baseline_trials)
         self._refresh_noise_tree()
+        self._refresh_audio_preload_tree()
         self._update_protocol_summary()
 
     def _refresh_noise_tree(self) -> None:
@@ -312,6 +392,26 @@ class StimulusDesignerApp:
         if self.noises and not self.noise_tree.selection():
             self.noise_tree.selection_set("0")
             self._noise_selected()
+
+    def _refresh_audio_preload_tree(self) -> None:
+        for item in self.audio_preload_tree.get_children():
+            self.audio_preload_tree.delete(item)
+        for kind, assets in [
+            ("looming", self.custom_looming_files),
+            ("prestimulus", self.prestimulus_files),
+        ]:
+            for idx, asset in enumerate(assets):
+                self.audio_preload_tree.insert(
+                    "",
+                    "end",
+                    iid=f"{kind}:{idx}",
+                    values=(
+                        "Looming" if kind == "looming" else "Prestimulus",
+                        asset.label,
+                        f"{asset.target_duration_s:g}",
+                        asset.path,
+                    ),
+                )
 
     def _parse_float(self, value: str, label: str) -> float:
         try:
@@ -379,6 +479,8 @@ class StimulusDesignerApp:
             name=self.name_var.get().strip() or "Untitled PPS stimulus design",
             sofa_file=self.sofa_var.get().strip(),
             noises=list(self.noises),
+            custom_looming_files=list(self.custom_looming_files),
+            prestimulus_files=list(self.prestimulus_files),
             trajectory=trajectory,
             protocol=protocol,
         )
@@ -424,6 +526,119 @@ class StimulusDesignerApp:
         self._refresh_noise_tree()
         self._update_protocol_summary()
         self.status_var.set("Noise definition removed.")
+
+    def _audio_preload_kind(self) -> str:
+        return "looming" if self.audio_preload_type_var.get().lower().startswith("loom") else "prestimulus"
+
+    def _audio_preload_list(self, kind: str) -> list[AudioFileSpec]:
+        return self.custom_looming_files if kind == "looming" else self.prestimulus_files
+
+    def _selected_audio_preload(self) -> tuple[str, int] | None:
+        selected = self.audio_preload_tree.selection()
+        if not selected:
+            return None
+        kind, idx_text = selected[0].split(":", 1)
+        return kind, int(idx_text)
+
+    def _audio_preload_selected(self, _event=None) -> None:
+        selected = self._selected_audio_preload()
+        if selected is None:
+            return
+        kind, idx = selected
+        asset = self._audio_preload_list(kind)[idx]
+        self.audio_preload_type_var.set("Looming" if kind == "looming" else "Prestimulus")
+        self.audio_preload_label_var.set(asset.label)
+        self.audio_preload_path_var.set(asset.path)
+        self.audio_preload_duration_var.set(str(asset.target_duration_s))
+
+    def _browse_audio_preload(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Select custom audio preload",
+            filetypes=[
+                ("Audio files", "*.wav *.flac *.aiff *.aif *.mp3"),
+                ("WAV files", "*.wav"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            self.audio_preload_path_var.set(path)
+            if not self.audio_preload_label_var.get().strip():
+                self.audio_preload_label_var.set(Path(path).stem)
+
+    def _add_or_update_audio_preload(self) -> None:
+        try:
+            asset = AudioFileSpec(
+                label=self.audio_preload_label_var.get().strip() or Path(self.audio_preload_path_var.get()).stem,
+                path=self.audio_preload_path_var.get().strip(),
+                target_duration_s=self._parse_float(self.audio_preload_duration_var.get(), "Target duration"),
+            )
+        except ValueError as exc:
+            messagebox.showerror("Invalid audio preload", str(exc))
+            return
+        if not asset.path:
+            messagebox.showerror("Invalid audio preload", "Choose an audio file path.")
+            return
+        if asset.target_duration_s <= 0:
+            messagebox.showerror("Invalid audio preload", "Target duration must be positive.")
+            return
+
+        target_kind = self._audio_preload_kind()
+        selected = self._selected_audio_preload()
+        new_iid: str
+        if selected is None:
+            target_list = self._audio_preload_list(target_kind)
+            target_list.append(asset)
+            new_iid = f"{target_kind}:{len(target_list) - 1}"
+        else:
+            old_kind, idx = selected
+            if old_kind == target_kind:
+                target_list = self._audio_preload_list(target_kind)
+                target_list[idx] = asset
+                new_iid = f"{target_kind}:{idx}"
+            else:
+                del self._audio_preload_list(old_kind)[idx]
+                target_list = self._audio_preload_list(target_kind)
+                target_list.append(asset)
+                new_iid = f"{target_kind}:{len(target_list) - 1}"
+
+        self._refresh_audio_preload_tree()
+        self.audio_preload_tree.selection_set(new_iid)
+        self.status_var.set("Custom audio preload updated.")
+
+    def _remove_audio_preload(self) -> None:
+        selected = self._selected_audio_preload()
+        if selected is None:
+            return
+        kind, idx = selected
+        del self._audio_preload_list(kind)[idx]
+        self._refresh_audio_preload_tree()
+        self.status_var.set("Custom audio preload removed.")
+
+    def _validate_audio_preload(self) -> None:
+        path = Path(self.audio_preload_path_var.get())
+        if not path.exists():
+            messagebox.showerror("Audio preload", f"File not found:\n{path}")
+            return
+        try:
+            target = self._parse_float(self.audio_preload_duration_var.get(), "Target duration")
+            summary = audio_file_summary(path)
+        except Exception as exc:
+            messagebox.showerror("Audio preload", str(exc))
+            return
+        duration = summary["duration_s"]
+        msg = (
+            f"Duration: {duration:.4f}s\n"
+            f"Target: {target:.4f}s\n"
+            f"Sample rate: {summary['sample_rate']} Hz\n"
+            f"Channels: {summary['channels']}\n"
+            f"Frames: {summary['frames']}"
+        )
+        if abs(duration - target) > 0.001:
+            messagebox.showwarning("Audio preload", msg)
+            self.status_var.set(f"Audio file differs from target by {duration - target:+.4f}s.")
+        else:
+            messagebox.showinfo("Audio preload", msg)
+            self.status_var.set("Audio preload duration matches target.")
 
     def _browse_sofa(self) -> None:
         path = filedialog.askopenfilename(
@@ -529,8 +744,19 @@ class StimulusDesignerApp:
         if not path:
             return
         self.design_path = Path(path)
+        self.design = design
         save_design(design, self.design_path)
         self.status_var.set(f"Saved {self.design_path}")
+
+    def _save_settings_clicked(self) -> None:
+        try:
+            design = self._build_design_from_fields()
+        except ValueError as exc:
+            messagebox.showerror("Invalid design", str(exc))
+            return
+        self.design = design
+        save_design(design, self.design_path)
+        self.status_var.set(f"Saved settings to {self.design_path}")
 
     def _load_clicked(self) -> None:
         path = filedialog.askopenfilename(
@@ -545,6 +771,15 @@ class StimulusDesignerApp:
         self._load_into_fields(self.design)
         self._update_preview()
         self.status_var.set(f"Loaded {self.design_path}")
+
+    def _load_settings_clicked(self) -> None:
+        if not self.design_path.exists():
+            messagebox.showinfo("Load settings", f"No saved settings found yet:\n{self.design_path}")
+            return
+        self.design = load_design(self.design_path)
+        self._load_into_fields(self.design)
+        self._update_preview()
+        self.status_var.set(f"Loaded settings from {self.design_path}")
 
     def _export_trajectory_clicked(self) -> None:
         try:

@@ -16,19 +16,27 @@ pps-design
 
 ## Design Controls
 
+The designer is split into two main tabs:
+
+- `Stimulus Design`: SOFA/HRIR source, noise definitions, azimuth/elevation orientations, custom looming WAV preloads, custom prestimulus WAV preloads, and looming trajectory preview.
+- `Trial Design`: repetitions, SOA values, spatial values, auditory motion labels, tactile sites, baseline/catch-trial settings, respiratory phases, blocks, participants, and seed.
+
 The designer currently covers:
 
 - SOFA HRIR file selection and validation through the `sofar` package
 - noise definitions for pink, blue, white, and brown noise
 - per-noise azimuth, elevation, and gain
 - snapping noise orientations to the nearest available SOFA source position
+- custom looming stimulus files, stored as named preload paths with target duration
+- custom prestimulus files, such as 4-second breathing or instruction chunks, stored as named preload paths with target duration
 - looming trajectory radius, path direction, path length, propagation speed, start/end azimuth, elevation, and lead/tail padding
 - protocol schedule controls for repetitions per condition, SOA values, spatial values, catch-trial percentage, respiratory phases, blocks, participants, and random seed
 - auditory motion directions, tactile body sites, baseline-specific SOAs, and exact catch-trial counts for paradigms that report fixed trial counts
 - preloadable published-study templates with verification status and citation metadata
 - paired SOA/spatial values for distance-at-tactile designs, or full-factorial SOA x spatial designs for broader PPS variants
 - a top-down trajectory preview
-- JSON design save/load
+- repeatable settings save/load
+- JSON design save/load and Save As
 - trajectory CSV export
 - protocol CSV export
 
@@ -39,6 +47,8 @@ The default saved design path is:
 ```text
 configs\stimulus_design.generated.json
 ```
+
+Use `Save Settings` to write the current UI state to this path, or to the currently loaded/saved design file. Use `Load Settings` to restore that same file without opening a file picker. The default generated settings file is ignored by Git, so a lab can reuse it locally while keeping published template/example JSON files stable.
 
 Generated trajectory CSVs should be exported to `artifacts\`, which is ignored by Git.
 
