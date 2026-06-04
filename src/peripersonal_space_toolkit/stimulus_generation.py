@@ -1,108 +1,19 @@
-﻿"""
-========================================================================
-PERIPERSONAL SPACE (PPS) EXPERIMENT - COMPLETE STIMULUS GENERATOR
-========================================================================
+﻿"""Stimulus generation for the audio-tactile PPS toolkit.
 
-This script generates all stimuli for the audio-tactile peripersonal space experiment.
-It recreates the entire pipeline from the Jupyter notebook in a single, reproducible script.
+The generator creates Study 5-style audio-tactile stimuli and participant
+sequence folders from repository-relative inputs and command-line path
+overrides. Generated WAVs and participant schedules are written under
+`artifacts/` by default and are not intended to be committed.
 
-========================================================================
-QUICK START - HOW TO USE THIS SCRIPT
-========================================================================
+Public CLI:
+    pps-generate --dry-run
+    pps-generate --participants 50
 
-1. CHECK YOUR DIRECTORIES:
-   - ROOT_DIRECTORY: Base generated-artifact folder
-   - INPUT_DIR: Where user-supplied HRIR or optional looming WAVs live
-   - OUTPUT_DIR: Where all generated stimuli will be saved
+Required local input when generating looming stimuli from scratch:
+    assets/0. Head-Related Impulse Response (HRIR) model/FABIAN_HRIR_measured_HATO_0.sofa
 
-   Example:
-   ROOT_DIRECTORY = Path("C:/MyExperiment")
-   INPUT_DIR = ROOT_DIRECTORY / "0_Input"
-   OUTPUT_DIR = ROOT_DIRECTORY / "0_Output"
-
-2. ENSURE REQUIRED INPUT FILES ARE PRESENT IN INPUT_DIR:
-   INPUT_DIR/
-   â”œâ”€â”€ 0. Head-Related Impulse Response (HRIR) model/
-   â”‚   â””â”€â”€ FABIAN_HRIR_measured_HATO_0.sofa (only if generating looming from scratch)
-   â”œâ”€â”€ 0. BoxBreathingInstructions/
-   â”‚   â”œâ”€â”€ Inhale-2-3-4-hold_FIXED.wav
-   â”‚   â””â”€â”€ Exhale-2-3-4-hold_FIXED.wav
-   â””â”€â”€ 1. Looming Stimuli/ (pre-generated, recommended!)
-       â”œâ”€â”€ Loom-1-pink-v1-padded.wav (or v2-holds)
-       â”œâ”€â”€ Loom-2-blue-v1-padded.wav (or v2-holds)
-       â”œâ”€â”€ Loom-3-white-v1-padded.wav (or v2-holds)
-       â””â”€â”€ Loom-4-brown-v1-padded.wav (or v2-holds)
-
-3. INSTALL DEPENDENCIES:
-   pip install -e .
-
-4. RUN THE CLI:
-   pps-generate --participants 50
-
-   All generated files will be saved to OUTPUT_DIR/
-
-========================================================================
-
-UPDATED PARAMETERS (Based on literature recommendations):
-- Looming distance: 110 cm â†’ 10 cm (1.1 m â†’ 0.1 m)
-- Duration: 3 seconds
-- Velocity: 33.3 cm/s (100 cm / 3 s)
-
-STIMULUS TYPES GENERATED:
-1. Tactile stimuli (100ms vibrotactile signals with various onset delays)
-2. Looming audio stimuli (4 noise types with HRTF spatial filtering)
-3. Combined looming Ã— tactile stimuli (20 combinations)
-4. Breathing instruction + stimulus trials (Inhale/Exhale versions)
-5. Baseline trials (tactile only, no looming)
-6. Catch trials (looming only, no tactile)
-7. Master blocks (trial structure definitions)
-8. Experiment blocks (counterbalanced sequences for 50 participants)
-
-CRITICAL TIMING DETAILS:
-- Looming stimuli (pre-generated): EXACTLY 4.0 seconds (176,400 samples)
-  * v1-padded: 500ms silence + 3.0s looming + 500ms silence
-  * v2-holds: 4.0s looming with integrated breathing holds
-- Tactile stimuli: 100ms + SOA delays (300, 800, 1500, 2200, 2700 ms)
-- Combined stimuli: EXACTLY 4.0 seconds (looming + tactile aligned)
-- Full trials: EXACTLY 8.0 seconds (breathing ~4s + stimulus exactly 4s)
-- All durations are precise to the sample level (no rounding errors)
-
-DIRECTORY STRUCTURE:
-
-INPUT_DIR/ (you provide these files)
-â”œâ”€â”€ 0. Head-Related Impulse Response (HRIR) model/
-â”‚   â””â”€â”€ FABIAN_HRIR_measured_HATO_0.sofa
-â””â”€â”€ 0. BoxBreathingInstructions/
-    â”œâ”€â”€ Inhale-2-3-4-hold_FIXED.wav
-    â””â”€â”€ Exhale-2-3-4-hold_FIXED.wav
-
-OUTPUT_DIR/ (script creates these)
-â”œâ”€â”€ 1. TactileStimuli/
-â”œâ”€â”€ 2. LoomingStimuli/
-â”œâ”€â”€ 4. LoomingXTactile_Stimuli/
-â”œâ”€â”€ 5. Breathingphase+LoomingXTactile/Inhale/
-â”œâ”€â”€ 5. Breathingphase+LoomingXTactile/Exhale/
-â”œâ”€â”€ 6. Baseline/Inhale/
-â”œâ”€â”€ 6. Baseline/Exhale/
-â”œâ”€â”€ 7. Catch/Inhale/
-â”œâ”€â”€ 7. Catch/Exhale/
-â”œâ”€â”€ 8.Master_Blocks/
-â”œâ”€â”€ 9.Experiment_Blocks/
-â””â”€â”€ 10.Participant_Sequences/
-
-REQUIREMENTS:
-- numpy
-- scipy
-- soundfile
-- pysofaconventions (for HRTF loading)
-
-USAGE:
-    python generate_all_stimuli.py
-
-Author: George Fejer
-Date: 2025
-Reference: Lerner et al. (2021), Frontiers in Virtual Reality
-========================================================================
+The SOFA/HRIR file is user-supplied because redistribution rights vary.
+Pregenerated looming WAVs may also be supplied through `--use-pregenerated-looming`.
 """
 
 import csv
@@ -1630,4 +1541,3 @@ if __name__ == "__main__":
 
     # Run main pipeline
     main()
-

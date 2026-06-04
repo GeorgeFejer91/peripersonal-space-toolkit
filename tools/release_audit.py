@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 """Release-readiness checks for the PPS toolkit."""
 
 from __future__ import annotations
@@ -43,10 +43,16 @@ FORBIDDEN_PATTERNS = [
     re.compile(r"Project2_PeriPersonalSpace", re.IGNORECASE),
     re.compile(r"C:\\Users\\", re.IGNORECASE),
     re.compile(r"George\.Fejer", re.IGNORECASE),
+    re.compile(r"REPLACE-ME", re.IGNORECASE),
     re.compile(r"private_not_for_public", re.IGNORECASE),
     re.compile(r"raw_recordings", re.IGNORECASE),
     re.compile(r"decoder_outputs_name_bearing", re.IGNORECASE),
 ]
+FORBIDDEN_SUFFIXES = {".aup3", ".apk", ".xdf", ".sofa", ".hrir", ".mp3", ".flac", ".m4a", ".ogg"}
+ALLOWED_WAV_PREFIXES = {
+    Path("assets") / "breathing",
+    Path("assets") / "click",
+}
 SPOKEN_ASSETS = [
     "Inhale-2-3-4-hold_FIXED.wav",
     "Exhale-2-3-4-hold_FIXED.wav",
@@ -70,6 +76,14 @@ def iter_public_files(root: Path):
         yield path
 
 
+def _is_under(rel_path: Path, parent: Path) -> bool:
+    try:
+        rel_path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def check_required_files() -> list[str]:
     required = [
         "README.md",
@@ -82,11 +96,16 @@ def check_required_files() -> list[str]:
         "windows/Launch_PPS_App.bat",
         "windows/Launch_Stimulus_Designer.bat",
         "windows/Create_Desktop_Shortcut.ps1",
+        "docs/hardware_setup.md",
+        "docs/replication_workflow.md",
+        "docs/privacy_boundary.md",
         "docs/REPLICATION.md",
         "docs/WINDOWS_APP.md",
         "docs/STIMULUS_DESIGNER.md",
         "docs/PARADIGM_LIBRARY.md",
+        "docs/PPS_METADATA_REPRODUCIBILITY_AUDIT.md",
         "docs/PRIVACY_RELEASE.md",
+        "assets/breathing/spoken_assets_manifest.json",
         "assets/click/mouse_click_tone_1200Hz_50ms.wav",
         "assets/master_blocks/Master_Block_1.csv",
         "assets/master_blocks/Master_Block_2.csv",
@@ -96,6 +115,18 @@ def check_required_files() -> list[str]:
     for rel in required:
         if not (REPO_ROOT / rel).exists():
             problems.append(f"missing required file: {rel}")
+    return problems
+
+
+def check_public_file_inventory() -> list[str]:
+    problems = []
+    for path in iter_public_files(REPO_ROOT):
+        rel = path.relative_to(REPO_ROOT)
+        suffix = path.suffix.lower()
+        if suffix in FORBIDDEN_SUFFIXES:
+            problems.append(f"forbidden release artifact: {rel}")
+        if suffix == ".wav" and not any(_is_under(rel, prefix) for prefix in ALLOWED_WAV_PREFIXES):
+            problems.append(f"unapproved public WAV file: {rel}")
     return problems
 
 
@@ -180,6 +211,7 @@ def check_forbidden_text() -> list[str]:
 def run_audit() -> list[str]:
     problems = []
     problems.extend(check_required_files())
+    problems.extend(check_public_file_inventory())
     problems.extend(check_spoken_assets())
     problems.extend(check_master_blocks())
     problems.extend(check_study_templates())

@@ -1,49 +1,17 @@
-#!/usr/bin/env python
-"""
-decode_recordings.py
-====================
+﻿#!/usr/bin/env python
+"""Loopback WAV-to-CSV decoding for the audio-tactile PPS toolkit.
 
-Unified pilot WAV-to-CSV pipeline.
+The decoder reads local loopback WAV recordings, detects tactile cue timing,
+mouse-click timing, breathing-template timing, looming onset, SOA, noise type,
+and block/trial structure, then writes diagnostics and analysis-ready CSVs
+under `artifacts/decoded` by default.
 
-This is the only supported production script in ``PilotData``. It reads raw
-recordings from ``Input/*.wav``, decodes each session bottom-up from the WAV
-itself, runs built-in QC, applies automatic reference-assisted rescue only when
-needed, and writes all outputs under ``Output/``.
+Participant recordings stay local and should be placed under an ignored folder
+such as `local_data/loopback_recordings`.
 
-Core principle
---------------
-The recording is the source of truth. The primary path does not copy trial
-labels from the planned sequence. Instead it recovers directly from the WAV:
-
-1. tactile cue onset and mouse-click timing
-2. hit / miss / false-alarm outcomes
-3. respiratory phase from deterministic breathing-template matching
-4. looming onset, SOA, and noise type from deterministic template matching
-5. part / block / trial numbering from the observed temporal structure
-
-When the bottom-up decode is clearly incomplete but the participant has a known
-reference sequence, the script may run a bounded rescue pass. Those rows are
-explicitly labelled via ``data_source`` as ``observed``,
-``observed_partial``, or ``inferred_from_reference``.
-
-Folder contract
----------------
-- Input WAVs: ``Input/*.wav``
-- Diagnostic per-recording CSVs: ``Output/diagnostics/``
-- Analysis-ready per-recording CSVs: ``Output/final/``
-- Run summaries and QC reports: ``Output/summaries/``
-
-Usage
------
-    python decode_recordings.py
-    python decode_recordings.py --only P10 --overwrite
-
-Dependencies
-------------
-- Python standard library
-- ``numpy``
-- ``scipy``
-- Stimulus templates already present in the project tree
+Public CLI:
+    pps-decode --help
+    pps-decode --input-dir local_data/loopback_recordings --output-dir artifacts/decoded
 """
 
 from __future__ import annotations
@@ -104,7 +72,7 @@ LOOMING_TEMPLATE_DECIMATE = 4
 LOOMING_CUE_SOA_MIN_S = 0.20
 LOOMING_CUE_SOA_MAX_S = 3.20
 
-# The breathing instruction TTS files are FIXED — exactly the same audio is
+# The breathing instruction TTS files are FIXED â€” exactly the same audio is
 # played every time the narrator says "Inhale / two / three / four / hold"
 # or the Exhale equivalent. Background music is overlaid on top in the
 # recording, but the TTS waveform itself is invariant. So we can do
@@ -131,7 +99,7 @@ BREATHING_TEMPLATE_HOLD_OFFSET_S = 3.50
 # the ADAPTIVE threshold (see detect_breathing_events_via_templates) picks
 # a per-recording value between this floor and `BREATHING_TEMPLATE_MAX_SCORE`
 # based on the shape of the correlation-peak distribution in the actual
-# recording — so a quieter mic gain or louder music automatically gets a
+# recording â€” so a quieter mic gain or louder music automatically gets a
 # more permissive threshold.
 BREATHING_TEMPLATE_MIN_SCORE = 0.30
 BREATHING_TEMPLATE_MAX_SCORE = 0.60
@@ -190,9 +158,9 @@ def configure_paths(args: argparse.Namespace) -> None:
 
 # Part split: gap in the middle of the recording that separates Part 1
 # (viscereality VR) from Part 2 (minimal). Inter-block gaps within a
-# session are typically ≤ 60 s, so 80 s reliably separates part boundaries
+# session are typically â‰¤ 60 s, so 80 s reliably separates part boundaries
 # from block boundaries. We additionally require the gap to fall inside
-# the middle 20–80 % of the experimental window (handled below) so a
+# the middle 20â€“80 % of the experimental window (handled below) so a
 # participant pausing early doesn't get mistaken for a session boundary.
 PART_SPLIT_MIN_GAP_S = 80.0
 
@@ -617,7 +585,7 @@ def load_pps_module() -> Any:
 # ---------------------------------------------------------------------------
 
 def participant_id_from_filename(path: Path) -> str | None:
-    """Map P10_MelinaTaboritzki.wav → 'P10'; 22_LareReichel.wav → 'P22'."""
+    """Map P10_MelinaTaboritzki.wav â†’ 'P10'; 22_LareReichel.wav â†’ 'P22'."""
     stem = path.stem
     m = re.match(r"^[Pp](\d{1,2})(?:[_\-\s]|$)", stem)
     if m:
@@ -916,7 +884,7 @@ def _adaptive_threshold_from_peak_distribution(
         return floor
     peak_scores = correlation[peaks]
     if len(peak_scores) <= expected_count:
-        # Fewer peaks than the prior — recording is short or matches are
+        # Fewer peaks than the prior â€” recording is short or matches are
         # weak. Use the weakest peak as the threshold (accept all).
         adaptive = float(np.min(peak_scores))
     else:
@@ -979,9 +947,9 @@ def detect_breathing_events_via_templates(
     """Deterministically locate every Inhale/Exhale TTS instance in the
     audio channel by cross-correlating the full templates.
 
-    Fast path: we decimate the audio and the templates by ``decimate`` (4×
-    → 11025 Hz) before correlating. The TTS band is below 4 kHz so this is
-    lossless for our purpose and ~4× faster. Peak sample indices are
+    Fast path: we decimate the audio and the templates by ``decimate`` (4Ã—
+    â†’ 11025 Hz) before correlating. The TTS band is below 4 kHz so this is
+    lossless for our purpose and ~4Ã— faster. Peak sample indices are
     converted back to the original sample rate for the returned hits.
 
     For every peak above ``min_score`` that is separated from neighbouring
@@ -1978,7 +1946,7 @@ def _first_click_in_window(
     """Return (detected, click_start_sample_abs, peak_score, threshold).
 
     Finds the FIRST click-template peak above the adaptive threshold in
-    the window — not the strongest. This matters when a participant
+    the window â€” not the strongest. This matters when a participant
     accidentally double-clicks: we want RT against the first press, not
     the louder one.
     """
@@ -2014,7 +1982,7 @@ def _first_click_in_window(
             return False, None, peak_val, threshold
         return True, search_start + peak_idx, peak_val, threshold
 
-    # First peak in time = earliest click → RT against first press.
+    # First peak in time = earliest click â†’ RT against first press.
     first_peak_idx = int(peaks[0])
     return True, search_start + first_peak_idx, float(corr[first_peak_idx]), threshold
 
@@ -2041,7 +2009,7 @@ def measure_reaction_time(
         cue_run.start_sample + int(round(CLICK_SEARCH_POST_CUE_END_S * sample_rate)),
     )
     # Use the first-click variant rather than pps.detect_click_in_window
-    # (which returns the strongest click in the window — not what we want
+    # (which returns the strongest click in the window â€” not what we want
     # when a participant double-clicks, since RT should be measured from
     # the FIRST press).
     detected, click_start_abs, _peak, _thr = _first_click_in_window(
@@ -2198,7 +2166,7 @@ def _flip_phase(phase: str) -> str:
 def impute_unknown_phases_by_block_parity(rows: list[dict[str, Any]]) -> int:
     """Deterministic fallback: every block of the experiment starts with
     Inhale and alternates thereafter. Verified to hold across all 426
-    planned blocks × participants in the stimulus generator — it is a
+    planned blocks Ã— participants in the stimulus generator â€” it is a
     structural property of the design, not a per-participant detail, so
     we are allowed to rely on it without re-using the planned per-trial
     sequences.
@@ -2248,7 +2216,7 @@ def impute_unknown_phases_within_block(rows: list[dict[str, Any]]) -> int:
     Restricted to same block (same ``part_number`` AND same ``block_number``)
     so a between-block pause cannot propagate a stale phase across a
     possibly-resynchronised breathing clock. Catch rows are also skipped
-    (they have an empty ``block_number``) — their phase is either
+    (they have an empty ``block_number``) â€” their phase is either
     template-derived or stays Unknown.
 
     The row is mutated in-place:
@@ -2262,7 +2230,7 @@ def impute_unknown_phases_within_block(rows: list[dict[str, Any]]) -> int:
     def _t(row: dict[str, Any]) -> float | None:
         """Prefer tactile_cue_time_s (always precise). Fall back to
         trial_unit_start_s (which for Unknown rows is cue_end - 8, good
-        to about ±2 s — well within our ±4 s rounding tolerance)."""
+        to about Â±2 s â€” well within our Â±4 s rounding tolerance)."""
         for key in ("tactile_cue_time_s", "trial_unit_start_s"):
             v = row.get(key, "")
             if v not in ("", None):
@@ -2558,7 +2526,7 @@ def decode_recording(
         # Look only at template hits inside the experimental window so the
         # warmup practice doesn't get attached to real trial 1. Also use
         # ``earliest_hold_s = prev_cue_time_s`` so a single breathing hit
-        # cannot be claimed by two consecutive cues — if the template
+        # cannot be claimed by two consecutive cues â€” if the template
         # matcher missed the Inhale/Exhale between cue N and cue N+1, we
         # will honestly emit phase = Unknown for cue N+1 rather than
         # re-using cue N's breathing hit.
@@ -2626,7 +2594,7 @@ def decode_recording(
             # empty so they are not misread as the primary signal).
             verdict = None
         elif looming_waveform_templates is None:
-            # Fallback envelope detector — only hit when waveform
+            # Fallback envelope detector â€” only hit when waveform
             # correlation was unavailable.
             verdict = detect_looming_between_hold_and_cue(
                 audio_signal=audio_signal,
@@ -2881,17 +2849,17 @@ def decode_recording(
 
     # Compact alternation label derived from cross_verification_status.
     # Values:
-    #   ok             — phase alternated with the previous trial as expected
-    #   catch_between  — same phase as previous, 12-20 s gap (catch trial sat
+    #   ok             â€” phase alternated with the previous trial as expected
+    #   catch_between  â€” same phase as previous, 12-20 s gap (catch trial sat
     #                    between the two cues; alternation still holds at the
     #                    breathing-cycle level)
-    #   large_gap      — same phase as previous but a big gap (block / part
+    #   large_gap      â€” same phase as previous but a big gap (block / part
     #                    boundary crossed; not an anomaly)
-    #   anomaly        — same phase as previous with a short gap. This is
+    #   anomaly        â€” same phase as previous with a short gap. This is
     #                    suspicious and the only value the user should audit.
-    #   first          — first trial, nothing to compare against
-    #   unknown        — phase is Unknown on this trial
-    #   prev_unknown   — previous trial's phase was Unknown, cannot audit
+    #   first          â€” first trial, nothing to compare against
+    #   unknown        â€” phase is Unknown on this trial
+    #   prev_unknown   â€” previous trial's phase was Unknown, cannot audit
     _ALT_MAP = {
         "consistent": "ok",
         "phase_repeat_probably_catch_between": "catch_between",
@@ -3632,7 +3600,7 @@ def should_prefer_rescue_qc(bottom_up_qc: dict[str, Any], rescue_qc: dict[str, A
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Unified Pilot WAV-to-CSV pipeline.",
+        description="Decode local PPS loopback WAV recordings into analysis-ready CSV files.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

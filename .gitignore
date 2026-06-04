@@ -21,3 +21,11 @@ LoopbackRecordings/
 private_not_for_public*/
 decoder_outputs_name_bearing/
 raw_recordings/
+*.sofa
+*.hrir
+*.mp3
+*.flac
+*.m4a
+*.ogg
+assets/0. Head-Related Impulse Response (HRIR) model/
+background_music/

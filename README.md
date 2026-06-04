@@ -1,4 +1,4 @@
-# Peripersonal Space Toolkit
+﻿# Peripersonal Space Toolkit
 
 A Windows-ready toolkit for running and reproducing the Study 5 audio-tactile peripersonal-space experiment. The repository packages the experiment runner, stimulus-generation pipeline, decoding helpers, small deidentified sample data, and Kokoro-generated spoken instruction assets.
 
@@ -81,7 +81,7 @@ assets\click\            Click/tactile cue seed asset
 assets\master_blocks\    Study block templates
 configs\                 Example experiment and stimulus-design configs
 data\sample\             Deidentified sample analysis CSVs
-docs\                    Replication, Windows, privacy, and protocol notes
+docs\\                    Hardware setup, replication, privacy, Windows, protocol, and paradigm notes
 src\                     Python package and command entry points
 study_templates\         Literature-backed preloadable paradigm templates
 tests\                   Smoke and release-readiness tests
@@ -91,7 +91,7 @@ windows\                 Ready-to-use Windows setup and launch scripts
 
 ## Privacy And Release Boundaries
 
-Do not commit participant recordings, demographics, raw exports, or generated local experiment output. The ignored folders `local_data\`, `artifacts\`, and `models\` are intended for local use only. Run this before publishing a release:
+Do not commit participant recordings, demographics, raw exports, or generated local experiment output. The ignored folders `local_data\`, `artifacts\`, and `models\` are intended for local use only. See [docs/hardware_setup.md](docs/hardware_setup.md), [docs/replication_workflow.md](docs/replication_workflow.md), and [docs/privacy_boundary.md](docs/privacy_boundary.md). Run this before publishing a release:
 
 ```powershell
 python tools\release_audit.py
