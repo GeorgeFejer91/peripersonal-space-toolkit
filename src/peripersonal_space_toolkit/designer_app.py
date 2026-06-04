@@ -9,21 +9,26 @@ from tkinter import filedialog, messagebox, ttk
 
 from .design import (
     NoiseDefinition,
+    ProtocolSpec,
     StimulusDesign,
     TrajectorySpec,
     default_design,
+    export_protocol_csv,
     export_trajectory_csv,
     load_design,
+    protocol_summary,
     save_design,
     snap_noises_to_sofa,
     sofa_summary,
     trajectory_points,
     validate_design,
 )
+from .templates import StudyTemplate, load_templates
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DESIGN_PATH = REPO_ROOT / "configs" / "stimulus_design.generated.json"
+TEMPLATE_DIR = REPO_ROOT / "study_templates"
 
 
 class StimulusDesignerApp:
@@ -32,6 +37,7 @@ class StimulusDesignerApp:
         self.design_path = design_path
         self.design = load_design(design_path) if design_path.exists() else default_design()
         self.noises: list[NoiseDefinition] = list(self.design.noises)
+        self.templates: list[StudyTemplate] = load_templates(TEMPLATE_DIR)
 
         self.root.title("Peripersonal Space Toolkit - Stimulus Designer")
         self.root.geometry("1120x760")
@@ -44,6 +50,7 @@ class StimulusDesignerApp:
         self.noise_azimuth_var = tk.StringVar()
         self.noise_elevation_var = tk.StringVar()
         self.noise_gain_var = tk.StringVar()
+        self.template_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready.")
 
         self.traj_vars = {
@@ -58,6 +65,22 @@ class StimulusDesignerApp:
             "padding_pre_s": tk.StringVar(),
             "padding_post_s": tk.StringVar(),
         }
+        self.protocol_vars = {
+            "repetitions_per_condition": tk.StringVar(),
+            "soa_values_ms": tk.StringVar(),
+            "spatial_values_cm": tk.StringVar(),
+            "auditory_motion_directions": tk.StringVar(),
+            "tactile_sites": tk.StringVar(),
+            "catch_trial_percentage": tk.StringVar(),
+            "catch_trials_exact": tk.StringVar(),
+            "baseline_soa_values_ms": tk.StringVar(),
+            "respiratory_phases": tk.StringVar(),
+            "blocks": tk.StringVar(),
+            "participants": tk.StringVar(),
+            "random_seed": tk.StringVar(),
+        }
+        self.pair_spatial_values_var = tk.BooleanVar()
+        self.include_baseline_var = tk.BooleanVar()
 
         self._build_ui()
         self._load_into_fields(self.design)
@@ -75,6 +98,16 @@ class StimulusDesignerApp:
         ttk.Entry(header, textvariable=self.sofa_var).grid(row=0, column=3, sticky="ew", padx=6, pady=6)
         ttk.Button(header, text="Browse", command=self._browse_sofa).grid(row=0, column=4, padx=4, pady=6)
         ttk.Button(header, text="Validate", command=self._validate_sofa).grid(row=0, column=5, padx=4, pady=6)
+        ttk.Label(header, text="Preload").grid(row=1, column=0, sticky="w", padx=6, pady=6)
+        template_values = [f"{item.title} [{item.verification_status}]" for item in self.templates]
+        self.template_combo = ttk.Combobox(
+            header,
+            textvariable=self.template_var,
+            values=template_values,
+            state="readonly",
+        )
+        self.template_combo.grid(row=1, column=1, columnspan=4, sticky="ew", padx=6, pady=6)
+        ttk.Button(header, text="Load Template", command=self._load_template_clicked).grid(row=1, column=5, padx=4, pady=6)
         header.columnconfigure(3, weight=1)
 
         body = ttk.PanedWindow(outer, orient="horizontal")
@@ -86,6 +119,7 @@ class StimulusDesignerApp:
         body.add(right, weight=2)
 
         self._build_noise_panel(left)
+        self._build_protocol_panel(left)
         self._build_trajectory_panel(right)
 
         footer = ttk.Frame(outer)
@@ -93,7 +127,8 @@ class StimulusDesignerApp:
         ttk.Label(footer, textvariable=self.status_var).pack(side="left", fill="x", expand=True)
         ttk.Button(footer, text="Load", command=self._load_clicked).pack(side="right", padx=4)
         ttk.Button(footer, text="Save", command=self._save_clicked).pack(side="right", padx=4)
-        ttk.Button(footer, text="Export CSV", command=self._export_trajectory_clicked).pack(side="right", padx=4)
+        ttk.Button(footer, text="Export Protocol", command=self._export_protocol_clicked).pack(side="right", padx=4)
+        ttk.Button(footer, text="Export Trajectory", command=self._export_trajectory_clicked).pack(side="right", padx=4)
         ttk.Button(footer, text="Check", command=self._check_design).pack(side="right", padx=4)
 
     def _build_noise_panel(self, parent: ttk.Frame) -> None:
@@ -142,6 +177,53 @@ class StimulusDesignerApp:
         ttk.Button(buttons, text="Add / Update", command=self._add_or_update_noise).pack(side="left", padx=2)
         ttk.Button(buttons, text="Remove", command=self._remove_noise).pack(side="left", padx=2)
         ttk.Button(buttons, text="Snap To SOFA", command=self._snap_noises).pack(side="left", padx=2)
+
+    def _build_protocol_panel(self, parent: ttk.Frame) -> None:
+        panel = ttk.LabelFrame(parent, text="Protocol Schedule")
+        panel.pack(fill="both", expand=True, pady=(8, 0))
+
+        form = ttk.Frame(panel)
+        form.pack(fill="x", padx=8, pady=8)
+        rows = [
+            ("repetitions_per_condition", "Repetitions", 0),
+            ("soa_values_ms", "SOAs ms", 1),
+            ("spatial_values_cm", "Spatial cm", 2),
+            ("auditory_motion_directions", "Motions", 3),
+            ("tactile_sites", "Tactile sites", 4),
+            ("catch_trial_percentage", "Catch %", 5),
+            ("catch_trials_exact", "Catch exact", 6),
+            ("baseline_soa_values_ms", "Baseline SOAs", 7),
+            ("respiratory_phases", "Phases", 8),
+            ("blocks", "Blocks", 9),
+            ("participants", "Participants", 10),
+            ("random_seed", "Seed", 11),
+        ]
+        for key, label, row in rows:
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=2)
+            entry = ttk.Entry(form, textvariable=self.protocol_vars[key], width=22)
+            entry.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+            self.protocol_vars[key].trace_add("write", lambda *_: self._update_protocol_summary())
+        form.columnconfigure(1, weight=1)
+
+        ttk.Checkbutton(
+            form,
+            text="Pair SOA and spatial values",
+            variable=self.pair_spatial_values_var,
+            command=self._update_protocol_summary,
+        ).grid(row=12, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+        ttk.Checkbutton(
+            form,
+            text="Include tactile-only baseline",
+            variable=self.include_baseline_var,
+            command=self._update_protocol_summary,
+        ).grid(row=13, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+
+        self.protocol_tree = ttk.Treeview(panel, columns=("metric", "value"), show="headings", height=7)
+        self.protocol_tree.heading("metric", text="Metric")
+        self.protocol_tree.heading("value", text="Count")
+        self.protocol_tree.column("metric", width=150, anchor="w")
+        self.protocol_tree.column("value", width=90, anchor="center")
+        self.protocol_tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
     def _build_trajectory_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Looming Trajectory")
@@ -193,7 +275,23 @@ class StimulusDesignerApp:
         traj = design.trajectory
         for key, var in self.traj_vars.items():
             var.set(str(getattr(traj, key)))
+        protocol = design.protocol
+        self.protocol_vars["repetitions_per_condition"].set(str(protocol.repetitions_per_condition))
+        self.protocol_vars["soa_values_ms"].set(", ".join(str(value) for value in protocol.soa_values_ms))
+        self.protocol_vars["spatial_values_cm"].set(", ".join(f"{value:g}" for value in protocol.spatial_values_cm))
+        self.protocol_vars["auditory_motion_directions"].set(", ".join(protocol.auditory_motion_directions))
+        self.protocol_vars["tactile_sites"].set(", ".join(protocol.tactile_sites))
+        self.protocol_vars["catch_trial_percentage"].set(f"{protocol.catch_trial_percentage:g}")
+        self.protocol_vars["catch_trials_exact"].set("" if protocol.catch_trials_exact is None else str(protocol.catch_trials_exact))
+        self.protocol_vars["baseline_soa_values_ms"].set(", ".join(str(value) for value in protocol.baseline_soa_values_ms))
+        self.protocol_vars["respiratory_phases"].set(", ".join(protocol.respiratory_phases))
+        self.protocol_vars["blocks"].set(str(protocol.blocks))
+        self.protocol_vars["participants"].set(str(protocol.participants))
+        self.protocol_vars["random_seed"].set(str(protocol.random_seed))
+        self.pair_spatial_values_var.set(protocol.pair_spatial_values_with_soas)
+        self.include_baseline_var.set(protocol.include_baseline_trials)
         self._refresh_noise_tree()
+        self._update_protocol_summary()
 
     def _refresh_noise_tree(self) -> None:
         for item in self.noise_tree.get_children():
@@ -221,6 +319,33 @@ class StimulusDesignerApp:
         except ValueError as exc:
             raise ValueError(f"{label} must be a number.") from exc
 
+    def _parse_int(self, value: str, label: str) -> int:
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ValueError(f"{label} must be an integer.") from exc
+
+    def _parse_int_list(self, value: str, label: str) -> list[int]:
+        try:
+            return [int(part.strip()) for part in value.split(",") if part.strip()]
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a comma-separated list of integers.") from exc
+
+    def _parse_float_list(self, value: str, label: str) -> list[float]:
+        try:
+            return [float(part.strip()) for part in value.split(",") if part.strip()]
+        except ValueError as exc:
+            raise ValueError(f"{label} must be a comma-separated list of numbers.") from exc
+
+    def _parse_string_list(self, value: str) -> list[str]:
+        return [part.strip() for part in value.split(",") if part.strip()]
+
+    def _parse_optional_int(self, value: str, label: str) -> int | None:
+        value = value.strip()
+        if not value:
+            return None
+        return self._parse_int(value, label)
+
     def _build_design_from_fields(self) -> StimulusDesign:
         trajectory = TrajectorySpec(
             start_radius_m=self._parse_float(self.traj_vars["start_radius_m"].get(), "Start radius"),
@@ -234,11 +359,28 @@ class StimulusDesignerApp:
             padding_pre_s=self._parse_float(self.traj_vars["padding_pre_s"].get(), "Lead padding"),
             padding_post_s=self._parse_float(self.traj_vars["padding_post_s"].get(), "Tail padding"),
         )
+        protocol = ProtocolSpec(
+            repetitions_per_condition=self._parse_int(self.protocol_vars["repetitions_per_condition"].get(), "Repetitions"),
+            soa_values_ms=self._parse_int_list(self.protocol_vars["soa_values_ms"].get(), "SOAs"),
+            spatial_values_cm=self._parse_float_list(self.protocol_vars["spatial_values_cm"].get(), "Spatial values"),
+            pair_spatial_values_with_soas=self.pair_spatial_values_var.get(),
+            auditory_motion_directions=self._parse_string_list(self.protocol_vars["auditory_motion_directions"].get()),
+            tactile_sites=self._parse_string_list(self.protocol_vars["tactile_sites"].get()),
+            catch_trial_percentage=self._parse_float(self.protocol_vars["catch_trial_percentage"].get(), "Catch percentage"),
+            catch_trials_exact=self._parse_optional_int(self.protocol_vars["catch_trials_exact"].get(), "Exact catch count"),
+            include_baseline_trials=self.include_baseline_var.get(),
+            baseline_soa_values_ms=self._parse_int_list(self.protocol_vars["baseline_soa_values_ms"].get(), "Baseline SOAs"),
+            respiratory_phases=self._parse_string_list(self.protocol_vars["respiratory_phases"].get()),
+            blocks=self._parse_int(self.protocol_vars["blocks"].get(), "Blocks"),
+            participants=self._parse_int(self.protocol_vars["participants"].get(), "Participants"),
+            random_seed=self._parse_int(self.protocol_vars["random_seed"].get(), "Seed"),
+        )
         return StimulusDesign(
             name=self.name_var.get().strip() or "Untitled PPS stimulus design",
             sofa_file=self.sofa_var.get().strip(),
             noises=list(self.noises),
             trajectory=trajectory,
+            protocol=protocol,
         )
 
     def _noise_selected(self, _event=None) -> None:
@@ -271,6 +413,7 @@ class StimulusDesignerApp:
         else:
             self.noises.append(noise)
         self._refresh_noise_tree()
+        self._update_protocol_summary()
         self.status_var.set("Noise definition updated.")
 
     def _remove_noise(self) -> None:
@@ -279,6 +422,7 @@ class StimulusDesignerApp:
             return
         del self.noises[int(selected[0])]
         self._refresh_noise_tree()
+        self._update_protocol_summary()
         self.status_var.set("Noise definition removed.")
 
     def _browse_sofa(self) -> None:
@@ -288,6 +432,21 @@ class StimulusDesignerApp:
         )
         if path:
             self.sofa_var.set(path)
+
+    def _load_template_clicked(self) -> None:
+        selected = self.template_combo.current()
+        if selected < 0 or selected >= len(self.templates):
+            return
+        template = self.templates[selected]
+        self.design = template.design
+        self._load_into_fields(self.design)
+        self._update_preview()
+        self.status_var.set(f"Loaded template: {template.title} ({template.verification_status})")
+        if template.verification_status != "verified":
+            messagebox.showwarning(
+                "Template needs verification",
+                "This template contains partial literature metadata. Confirm the source paper before exact replication.",
+            )
 
     def _validate_sofa(self) -> None:
         path = Path(self.sofa_var.get())
@@ -331,6 +490,28 @@ class StimulusDesignerApp:
         else:
             messagebox.showinfo("Design check", "Design check passed.")
             self.status_var.set("Design check passed.")
+
+    def _update_protocol_summary(self) -> None:
+        if not hasattr(self, "protocol_tree"):
+            return
+        for item in self.protocol_tree.get_children():
+            self.protocol_tree.delete(item)
+        try:
+            design = self._build_design_from_fields()
+            summary = protocol_summary(design)
+        except Exception:
+            return
+        labels = [
+            ("Audio-tactile trials", "audio_tactile_trials"),
+            ("Baseline trials", "baseline_trials"),
+            ("Catch trials", "catch_trials"),
+            ("Total trials", "total_trials"),
+            ("Trials per block", "trials_per_block"),
+            ("Participants", "participants"),
+            ("Participant-trials", "total_participant_trials"),
+        ]
+        for label, key in labels:
+            self.protocol_tree.insert("", "end", values=(label, summary[key]))
 
     def _save_clicked(self) -> None:
         try:
@@ -381,6 +562,24 @@ class StimulusDesignerApp:
         if not path:
             return
         export_trajectory_csv(design, Path(path))
+        self.status_var.set(f"Exported {path}")
+
+    def _export_protocol_clicked(self) -> None:
+        try:
+            design = self._build_design_from_fields()
+        except ValueError as exc:
+            messagebox.showerror("Invalid design", str(exc))
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export protocol CSV",
+            defaultextension=".csv",
+            initialdir=str(REPO_ROOT / "artifacts"),
+            initialfile="stimulus_protocol.csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        export_protocol_csv(design, Path(path))
         self.status_var.set(f"Exported {path}")
 
     def _update_preview(self) -> None:

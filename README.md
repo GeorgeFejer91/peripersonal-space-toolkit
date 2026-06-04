@@ -37,11 +37,13 @@ Then run:
 windows\Launch_PPS_App.bat
 ```
 
-Open the stimulus designer for custom looming trajectories and SOFA-based azimuth planning:
+Open the stimulus designer for custom looming trajectories, SOFA-based azimuth planning, repetitions, SOA/spatial values, and catch-trial percentages:
 
 ```bat
 windows\Launch_Stimulus_Designer.bat
 ```
+
+The designer can preload bundled published-paradigm templates from `study_templates\`; see [docs/PARADIGM_LIBRARY.md](docs/PARADIGM_LIBRARY.md).
 
 Optional: create a desktop shortcut for the launcher:
 
@@ -81,6 +83,7 @@ configs\                 Example experiment and stimulus-design configs
 data\sample\             Deidentified sample analysis CSVs
 docs\                    Replication, Windows, privacy, and protocol notes
 src\                     Python package and command entry points
+study_templates\         Literature-backed preloadable paradigm templates
 tests\                   Smoke and release-readiness tests
 tools\                   Asset generation and release audit scripts
 windows\                 Ready-to-use Windows setup and launch scripts

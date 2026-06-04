@@ -44,5 +44,40 @@
     "padding_post_s": 0.5,
     "sample_rate": 44100,
     "use_inverse_square": true
+  },
+  "protocol": {
+    "repetitions_per_condition": 1,
+    "soa_values_ms": [
+      300,
+      800,
+      1500,
+      2200,
+      2700
+    ],
+    "spatial_values_cm": [
+      100.0,
+      83.3,
+      60.0,
+      36.7,
+      20.0
+    ],
+    "pair_spatial_values_with_soas": true,
+    "auditory_motion_directions": [
+      "looming"
+    ],
+    "tactile_sites": [
+      "hand"
+    ],
+    "catch_trial_percentage": 10.0,
+    "catch_trials_exact": null,
+    "include_baseline_trials": true,
+    "baseline_soa_values_ms": [],
+    "respiratory_phases": [
+      "Inhale",
+      "Exhale"
+    ],
+    "blocks": 6,
+    "participants": 50,
+    "random_seed": 20250604
   }
 }

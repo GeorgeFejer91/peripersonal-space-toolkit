@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 import sys
 import wave
@@ -84,6 +85,7 @@ def check_required_files() -> list[str]:
         "docs/REPLICATION.md",
         "docs/WINDOWS_APP.md",
         "docs/STIMULUS_DESIGNER.md",
+        "docs/PARADIGM_LIBRARY.md",
         "docs/PRIVACY_RELEASE.md",
         "assets/click/mouse_click_tone_1200Hz_50ms.wav",
         "assets/master_blocks/Master_Block_1.csv",
@@ -135,6 +137,27 @@ def check_master_blocks() -> list[str]:
     return problems
 
 
+def check_study_templates() -> list[str]:
+    problems = []
+    template_dir = REPO_ROOT / "study_templates"
+    templates = sorted(template_dir.glob("*.json"))
+    if len(templates) < 5:
+        problems.append("expected at least five study template JSON files")
+    for path in templates:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for key in ["template_id", "title", "citation", "source_url", "verification_status", "design"]:
+            if not data.get(key):
+                problems.append(f"{path.relative_to(REPO_ROOT)} missing {key}")
+        if data.get("verification_status") not in {"verified", "partial", "unverified"}:
+            problems.append(f"{path.relative_to(REPO_ROOT)} has unknown verification_status")
+        protocol = data.get("design", {}).get("protocol", {})
+        if not protocol.get("soa_values_ms"):
+            problems.append(f"{path.relative_to(REPO_ROOT)} missing protocol SOA values")
+        if not protocol.get("spatial_values_cm"):
+            problems.append(f"{path.relative_to(REPO_ROOT)} missing protocol spatial values")
+    return problems
+
+
 def check_forbidden_text() -> list[str]:
     problems = []
     for path in iter_public_files(REPO_ROOT):
@@ -159,6 +182,7 @@ def run_audit() -> list[str]:
     problems.extend(check_required_files())
     problems.extend(check_spoken_assets())
     problems.extend(check_master_blocks())
+    problems.extend(check_study_templates())
     problems.extend(check_forbidden_text())
     return problems
 
