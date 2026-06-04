@@ -58,6 +58,16 @@ Bundled literature templates live in:
 study_templates\
 ```
 
+## Visual QA
+
+Run the screenshot verification loop after UI changes:
+
+```powershell
+python tools\ui_screenshot_check.py --iterations 2
+```
+
+The script opens the designer, captures `Stimulus Design` and `Trial Design`, writes screenshots to `artifacts\ui_verification\`, and records a JSON report with tab, image, and widget-geometry checks. Use the screenshots for visual inspection before publishing a Windows build.
+
 ## Relationship To Study 5 Replication
 
 `pps-generate` remains the locked Study 5 replication path. The designer adds a configurable layer for future variants and pilot work. Designs are explicit JSON artifacts so changes to azimuth, radius, direction, path length, or speed can be reviewed before they are used in a generated stimulus set.

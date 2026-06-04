@@ -31,6 +31,20 @@ from .templates import StudyTemplate, load_templates
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DESIGN_PATH = REPO_ROOT / "configs" / "stimulus_design.generated.json"
 TEMPLATE_DIR = REPO_ROOT / "study_templates"
+PALETTE = {
+    "window": "#f6f1ea",
+    "surface": "#fffbf5",
+    "surface_alt": "#eee5dc",
+    "border": "#d5c8ba",
+    "text": "#2f2a24",
+    "muted": "#6f6257",
+    "primary": "#8f4d2e",
+    "primary_active": "#77402a",
+    "accent": "#2f7d73",
+    "canvas": "#15110e",
+    "canvas_grid": "#3a3028",
+    "canvas_text": "#f2e7d8",
+}
 
 
 class StimulusDesignerApp:
@@ -46,6 +60,7 @@ class StimulusDesignerApp:
         self.root.title("Peripersonal Space Toolkit - Stimulus Designer")
         self.root.geometry("1180x780")
         self.root.minsize(1020, 680)
+        self._configure_style()
 
         self.name_var = tk.StringVar()
         self.sofa_var = tk.StringVar()
@@ -94,15 +109,101 @@ class StimulusDesignerApp:
         self._load_into_fields(self.design)
         self._update_preview()
 
+    def _configure_style(self) -> None:
+        self.root.configure(background=PALETTE["window"])
+        self.root.option_add("*Font", "Aptos 10")
+        self.root.option_add("*TCombobox*Listbox.background", PALETTE["surface"])
+        self.root.option_add("*TCombobox*Listbox.foreground", PALETTE["text"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", PALETTE["primary"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure(".", background=PALETTE["window"], foreground=PALETTE["text"], font=("Aptos", 10))
+        style.configure("TFrame", background=PALETTE["window"])
+        style.configure("TLabel", background=PALETTE["window"], foreground=PALETTE["text"])
+        style.configure("TLabelframe", background=PALETTE["window"], bordercolor=PALETTE["border"], relief="solid")
+        style.configure("TLabelframe.Label", background=PALETTE["window"], foreground=PALETTE["text"], font=("Aptos", 10, "bold"))
+        style.configure("TNotebook", background=PALETTE["window"], borderwidth=0)
+        style.configure("TNotebook.Tab", background=PALETTE["surface_alt"], foreground=PALETTE["muted"], padding=(10, 5))
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", PALETTE["surface"]), ("active", PALETTE["surface"])],
+            foreground=[("selected", PALETTE["text"]), ("active", PALETTE["text"])],
+        )
+        style.configure(
+            "TButton",
+            background=PALETTE["surface_alt"],
+            foreground=PALETTE["text"],
+            bordercolor=PALETTE["border"],
+            focusthickness=1,
+            focuscolor=PALETTE["accent"],
+            padding=(8, 3),
+        )
+        style.map(
+            "TButton",
+            background=[("active", "#e6d8ca"), ("pressed", "#ddcbbb")],
+            foreground=[("disabled", PALETTE["muted"])],
+        )
+        style.configure(
+            "TEntry",
+            fieldbackground=PALETTE["surface"],
+            foreground=PALETTE["text"],
+            bordercolor=PALETTE["border"],
+            insertcolor=PALETTE["text"],
+            padding=(4, 2),
+        )
+        style.configure(
+            "TSpinbox",
+            fieldbackground=PALETTE["surface"],
+            foreground=PALETTE["text"],
+            bordercolor=PALETTE["border"],
+            arrowsize=12,
+        )
+        style.configure(
+            "TCombobox",
+            fieldbackground=PALETTE["surface"],
+            background=PALETTE["surface_alt"],
+            foreground=PALETTE["text"],
+            bordercolor=PALETTE["border"],
+            arrowcolor=PALETTE["muted"],
+            padding=(4, 2),
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", PALETTE["surface"])],
+            foreground=[("readonly", PALETTE["text"])],
+        )
+        style.configure(
+            "Treeview",
+            background=PALETTE["surface"],
+            fieldbackground=PALETTE["surface"],
+            foreground=PALETTE["text"],
+            bordercolor=PALETTE["border"],
+            rowheight=23,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=PALETTE["surface_alt"],
+            foreground=PALETTE["text"],
+            relief="flat",
+            font=("Aptos", 10, "bold"),
+        )
+        style.map("Treeview", background=[("selected", PALETTE["primary"])], foreground=[("selected", "#ffffff")])
+        style.configure("TCheckbutton", background=PALETTE["window"], foreground=PALETTE["text"])
+
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, padding=10)
+        outer = ttk.Frame(self.root, padding=8)
         outer.pack(fill="both", expand=True)
 
         header = ttk.LabelFrame(outer, text="Design")
         header.pack(fill="x")
-        ttk.Label(header, text="Name").grid(row=0, column=0, sticky="w", padx=6, pady=6)
-        ttk.Entry(header, textvariable=self.name_var, width=44).grid(row=0, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Label(header, text="Preload").grid(row=0, column=2, sticky="w", padx=6, pady=6)
+        ttk.Label(header, text="Name").grid(row=0, column=0, sticky="w", padx=6, pady=4)
+        ttk.Entry(header, textvariable=self.name_var, width=44).grid(row=0, column=1, sticky="ew", padx=6, pady=4)
+        ttk.Label(header, text="Preload").grid(row=0, column=2, sticky="w", padx=6, pady=4)
         template_values = [f"{item.title} [{item.verification_status}]" for item in self.templates]
         self.template_combo = ttk.Combobox(
             header,
@@ -110,16 +211,16 @@ class StimulusDesignerApp:
             values=template_values,
             state="readonly",
         )
-        self.template_combo.grid(row=0, column=3, sticky="ew", padx=6, pady=6)
-        ttk.Button(header, text="Load Template", command=self._load_template_clicked).grid(row=0, column=4, padx=4, pady=6)
+        self.template_combo.grid(row=0, column=3, sticky="ew", padx=6, pady=4)
+        ttk.Button(header, text="Load Template", command=self._load_template_clicked).grid(row=0, column=4, padx=4, pady=4)
         header.columnconfigure(1, weight=1)
         header.columnconfigure(3, weight=2)
 
         notebook = ttk.Notebook(outer)
-        notebook.pack(fill="both", expand=True, pady=(10, 8))
+        notebook.pack(fill="both", expand=True, pady=(8, 6))
 
-        stimulus_tab = ttk.Frame(notebook, padding=8)
-        trial_tab = ttk.Frame(notebook, padding=8)
+        stimulus_tab = ttk.Frame(notebook, padding=6)
+        trial_tab = ttk.Frame(notebook, padding=6)
         notebook.add(stimulus_tab, text="Stimulus Design")
         notebook.add(trial_tab, text="Trial Design")
 
@@ -127,20 +228,13 @@ class StimulusDesignerApp:
         stimulus_body.pack(fill="both", expand=True)
         stimulus_left = ttk.Frame(stimulus_body, padding=(0, 0, 8, 0))
         stimulus_right = ttk.Frame(stimulus_body)
-        stimulus_body.add(stimulus_left, weight=1)
-        stimulus_body.add(stimulus_right, weight=2)
-
-        stimulus_right_split = ttk.PanedWindow(stimulus_right, orient="vertical")
-        stimulus_right_split.pack(fill="both", expand=True)
-        trajectory_frame = ttk.Frame(stimulus_right_split)
-        audio_preload_frame = ttk.Frame(stimulus_right_split)
-        stimulus_right_split.add(trajectory_frame, weight=3)
-        stimulus_right_split.add(audio_preload_frame, weight=2)
+        stimulus_body.add(stimulus_left, weight=2)
+        stimulus_body.add(stimulus_right, weight=3)
 
         self._build_sofa_panel(stimulus_left)
         self._build_noise_panel(stimulus_left)
-        self._build_trajectory_panel(trajectory_frame)
-        self._build_audio_preload_panel(audio_preload_frame)
+        self._build_audio_preload_panel(stimulus_left)
+        self._build_trajectory_panel(stimulus_right)
         self._build_protocol_panel(trial_tab)
 
         footer = ttk.Frame(outer)
@@ -156,22 +250,22 @@ class StimulusDesignerApp:
 
     def _build_sofa_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="SOFA / HRIR Source")
-        panel.pack(fill="x", pady=(0, 8))
-        ttk.Label(panel, text="SOFA file").grid(row=0, column=0, sticky="w", padx=8, pady=8)
-        ttk.Entry(panel, textvariable=self.sofa_var).grid(row=0, column=1, sticky="ew", padx=4, pady=8)
-        ttk.Button(panel, text="Browse", command=self._browse_sofa).grid(row=0, column=2, padx=4, pady=8)
-        ttk.Button(panel, text="Validate", command=self._validate_sofa).grid(row=0, column=3, padx=(4, 8), pady=8)
+        panel.pack(fill="x", pady=(0, 6))
+        ttk.Label(panel, text="SOFA file").grid(row=0, column=0, sticky="w", padx=8, pady=5)
+        ttk.Entry(panel, textvariable=self.sofa_var).grid(row=0, column=1, sticky="ew", padx=4, pady=5)
+        ttk.Button(panel, text="Browse", command=self._browse_sofa).grid(row=0, column=2, padx=4, pady=5)
+        ttk.Button(panel, text="Validate", command=self._validate_sofa).grid(row=0, column=3, padx=(4, 8), pady=5)
         panel.columnconfigure(1, weight=1)
 
     def _build_noise_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Noise Types And Orientations")
-        panel.pack(fill="both", expand=True)
+        panel.pack(fill="x", pady=(0, 6))
 
         self.noise_tree = ttk.Treeview(
             panel,
             columns=("label", "type", "azimuth", "elevation", "gain"),
             show="headings",
-            height=12,
+            height=4,
         )
         for column, label, width in [
             ("label", "Label", 140),
@@ -182,7 +276,7 @@ class StimulusDesignerApp:
         ]:
             self.noise_tree.heading(column, text=label)
             self.noise_tree.column(column, width=width, anchor="center")
-        self.noise_tree.pack(fill="both", expand=True, padx=8, pady=8)
+        self.noise_tree.pack(fill="x", padx=8, pady=6)
         self.noise_tree.bind("<<TreeviewSelect>>", self._noise_selected)
 
         form = ttk.Frame(panel)
@@ -205,35 +299,35 @@ class StimulusDesignerApp:
         form.columnconfigure(0, weight=1)
 
         buttons = ttk.Frame(panel)
-        buttons.pack(fill="x", padx=8, pady=(2, 8))
+        buttons.pack(fill="x", padx=8, pady=(2, 6))
         ttk.Button(buttons, text="Add / Update", command=self._add_or_update_noise).pack(side="left", padx=2)
         ttk.Button(buttons, text="Remove", command=self._remove_noise).pack(side="left", padx=2)
         ttk.Button(buttons, text="Snap To SOFA", command=self._snap_noises).pack(side="left", padx=2)
 
     def _build_audio_preload_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Custom Audio Preloads")
-        panel.pack(fill="both", expand=True, pady=(8, 0))
+        panel.pack(fill="both", expand=True)
 
         self.audio_preload_tree = ttk.Treeview(
             panel,
             columns=("type", "label", "target", "path"),
             show="headings",
-            height=6,
+            height=1,
         )
         for column, label, width, anchor in [
-            ("type", "Type", 90, "center"),
-            ("label", "Label", 140, "w"),
-            ("target", "Target s", 80, "center"),
-            ("path", "File", 360, "w"),
+            ("type", "Type", 78, "center"),
+            ("label", "Label", 110, "w"),
+            ("target", "Target s", 70, "center"),
+            ("path", "File", 190, "w"),
         ]:
             self.audio_preload_tree.heading(column, text=label)
             self.audio_preload_tree.column(column, width=width, anchor=anchor)
-        self.audio_preload_tree.pack(fill="both", expand=True, padx=8, pady=8)
+        self.audio_preload_tree.pack(fill="x", padx=8, pady=6)
         self.audio_preload_tree.bind("<<TreeviewSelect>>", self._audio_preload_selected)
 
         form = ttk.Frame(panel)
         form.pack(fill="x", padx=8)
-        for idx, text in enumerate(["Type", "Label", "Target s", "File"]):
+        for idx, text in enumerate(["Type", "Label", "Target s"]):
             ttk.Label(form, text=text).grid(row=0, column=idx, sticky="w", padx=3)
         ttk.Combobox(
             form,
@@ -244,13 +338,13 @@ class StimulusDesignerApp:
         ).grid(row=1, column=0, sticky="ew", padx=3, pady=4)
         ttk.Entry(form, textvariable=self.audio_preload_label_var, width=16).grid(row=1, column=1, sticky="ew", padx=3, pady=4)
         ttk.Spinbox(form, textvariable=self.audio_preload_duration_var, from_=0.1, to=60.0, increment=0.1, width=8).grid(row=1, column=2, sticky="w", padx=3, pady=4)
-        ttk.Entry(form, textvariable=self.audio_preload_path_var).grid(row=1, column=3, sticky="ew", padx=3, pady=4)
-        ttk.Button(form, text="Browse", command=self._browse_audio_preload).grid(row=1, column=4, padx=3, pady=4)
+        ttk.Label(form, text="File").grid(row=2, column=0, sticky="w", padx=3, pady=2)
+        ttk.Entry(form, textvariable=self.audio_preload_path_var).grid(row=3, column=0, columnspan=2, sticky="ew", padx=3, pady=4)
+        ttk.Button(form, text="Browse", command=self._browse_audio_preload).grid(row=3, column=2, sticky="ew", padx=3, pady=4)
         form.columnconfigure(1, weight=1)
-        form.columnconfigure(3, weight=3)
 
         buttons = ttk.Frame(panel)
-        buttons.pack(fill="x", padx=8, pady=(2, 8))
+        buttons.pack(fill="x", padx=8, pady=(2, 6))
         ttk.Button(buttons, text="Add / Update", command=self._add_or_update_audio_preload).pack(side="left", padx=2)
         ttk.Button(buttons, text="Remove", command=self._remove_audio_preload).pack(side="left", padx=2)
         ttk.Button(buttons, text="Validate File", command=self._validate_audio_preload).pack(side="left", padx=2)
@@ -262,38 +356,41 @@ class StimulusDesignerApp:
         form = ttk.Frame(panel)
         form.pack(fill="x", padx=8, pady=8)
         rows = [
-            ("repetitions_per_condition", "Repetitions", 0),
-            ("soa_values_ms", "SOAs ms", 1),
-            ("spatial_values_cm", "Spatial cm", 2),
-            ("auditory_motion_directions", "Motions", 3),
-            ("tactile_sites", "Tactile sites", 4),
-            ("catch_trial_percentage", "Catch %", 5),
-            ("catch_trials_exact", "Catch exact", 6),
-            ("baseline_soa_values_ms", "Baseline SOAs", 7),
-            ("respiratory_phases", "Phases", 8),
-            ("blocks", "Blocks", 9),
-            ("participants", "Participants", 10),
-            ("random_seed", "Seed", 11),
+            ("repetitions_per_condition", "Repetitions"),
+            ("soa_values_ms", "SOAs ms"),
+            ("spatial_values_cm", "Spatial cm"),
+            ("auditory_motion_directions", "Motions"),
+            ("tactile_sites", "Tactile sites"),
+            ("catch_trial_percentage", "Catch %"),
+            ("catch_trials_exact", "Catch exact"),
+            ("baseline_soa_values_ms", "Baseline SOAs"),
+            ("respiratory_phases", "Phases"),
+            ("blocks", "Blocks"),
+            ("participants", "Participants"),
+            ("random_seed", "Seed"),
         ]
-        for key, label, row in rows:
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=2)
-            entry = ttk.Entry(form, textvariable=self.protocol_vars[key], width=22)
-            entry.grid(row=row, column=1, sticky="ew", padx=4, pady=2)
+        for idx, (key, label) in enumerate(rows):
+            row = idx % 6
+            col = 0 if idx < 6 else 2
+            ttk.Label(form, text=label).grid(row=row, column=col, sticky="w", padx=4, pady=3)
+            entry = ttk.Entry(form, textvariable=self.protocol_vars[key], width=28)
+            entry.grid(row=row, column=col + 1, sticky="ew", padx=4, pady=3)
             self.protocol_vars[key].trace_add("write", lambda *_: self._update_protocol_summary())
         form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=1)
 
         ttk.Checkbutton(
             form,
             text="Pair SOA and spatial values",
             variable=self.pair_spatial_values_var,
             command=self._update_protocol_summary,
-        ).grid(row=12, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
         ttk.Checkbutton(
             form,
             text="Include tactile-only baseline",
             variable=self.include_baseline_var,
             command=self._update_protocol_summary,
-        ).grid(row=13, column=0, columnspan=2, sticky="w", padx=4, pady=2)
+        ).grid(row=6, column=2, columnspan=2, sticky="w", padx=4, pady=(8, 2))
 
         self.protocol_tree = ttk.Treeview(panel, columns=("metric", "value"), show="headings", height=7)
         self.protocol_tree.heading("metric", text="Metric")
@@ -321,27 +418,27 @@ class StimulusDesignerApp:
             ("padding_post_s", "Tail padding (s)", 0, 5, 0.1),
         ]
         for idx, (key, label, lo, hi, step) in enumerate(rows):
-            row = idx // 3
-            col = (idx % 3) * 2
+            row = idx // 2
+            col = (idx % 2) * 2
             ttk.Label(controls, text=label).grid(row=row, column=col, sticky="w", padx=5, pady=4)
             spin = ttk.Spinbox(controls, textvariable=self.traj_vars[key], from_=lo, to=hi, increment=step, width=10, command=self._update_preview)
             spin.grid(row=row, column=col + 1, sticky="w", padx=5, pady=4)
             self.traj_vars[key].trace_add("write", lambda *_: self._update_preview())
 
-        ttk.Label(controls, text="Direction").grid(row=3, column=0, sticky="w", padx=5, pady=4)
+        ttk.Label(controls, text="Direction").grid(row=5, column=0, sticky="w", padx=5, pady=4)
         ttk.Combobox(
             controls,
             textvariable=self.traj_vars["path_direction"],
             values=("approach", "recede", "left_to_right", "right_to_left", "custom"),
             state="readonly",
             width=16,
-        ).grid(row=3, column=1, sticky="w", padx=5, pady=4)
+        ).grid(row=5, column=1, sticky="w", padx=5, pady=4)
         self.traj_vars["path_direction"].trace_add("write", lambda *_: self._update_preview())
 
         self.duration_label = ttk.Label(controls, text="")
-        self.duration_label.grid(row=3, column=2, columnspan=4, sticky="w", padx=5, pady=4)
+        self.duration_label.grid(row=5, column=2, columnspan=2, sticky="w", padx=5, pady=4)
 
-        self.canvas = tk.Canvas(panel, background="#101418", highlightthickness=1, highlightbackground="#8a8f98")
+        self.canvas = tk.Canvas(panel, background=PALETTE["canvas"], highlightthickness=1, highlightbackground=PALETTE["border"])
         self.canvas.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.canvas.bind("<Configure>", lambda _event: self._update_preview())
 
@@ -847,23 +944,23 @@ class StimulusDesignerApp:
         for radius in (0.25, 0.5, 1.0, 1.5, 2.0):
             if radius <= max_abs * 1.1:
                 r = radius * scale
-                canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#28323b")
+                canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=PALETTE["canvas_grid"])
 
-        canvas.create_line(cx, 16, cx, h - 16, fill="#28323b")
-        canvas.create_line(16, cy, w - 16, cy, fill="#28323b")
-        canvas.create_oval(cx - 7, cy - 7, cx + 7, cy + 7, fill="#f2f5f7", outline="")
-        canvas.create_text(cx, cy + 20, fill="#d9dee5", text="Listener")
+        canvas.create_line(cx, 16, cx, h - 16, fill=PALETTE["canvas_grid"])
+        canvas.create_line(16, cy, w - 16, cy, fill=PALETTE["canvas_grid"])
+        canvas.create_oval(cx - 7, cy - 7, cx + 7, cy + 7, fill="#f3dcc3", outline="")
+        canvas.create_text(cx, cy + 20, fill=PALETTE["canvas_text"], text="Listener")
 
         xy = []
         for p in points:
             xy.extend([cx + p["x_m"] * scale, cy - p["y_m"] * scale])
         if len(xy) >= 4:
-            canvas.create_line(*xy, fill="#69c7ff", width=3, smooth=True)
+            canvas.create_line(*xy, fill="#4fb3a6", width=3, smooth=True)
         start = points[0]
         end = points[-1]
-        canvas.create_oval(cx + start["x_m"] * scale - 6, cy - start["y_m"] * scale - 6, cx + start["x_m"] * scale + 6, cy - start["y_m"] * scale + 6, fill="#79e36d", outline="")
-        canvas.create_oval(cx + end["x_m"] * scale - 6, cy - end["y_m"] * scale - 6, cx + end["x_m"] * scale + 6, cy - end["y_m"] * scale + 6, fill="#ff7373", outline="")
-        canvas.create_text(18, 18, anchor="nw", fill="#d9dee5", text="Top-down trajectory preview")
+        canvas.create_oval(cx + start["x_m"] * scale - 6, cy - start["y_m"] * scale - 6, cx + start["x_m"] * scale + 6, cy - start["y_m"] * scale + 6, fill="#a8d672", outline="")
+        canvas.create_oval(cx + end["x_m"] * scale - 6, cy - end["y_m"] * scale - 6, cx + end["x_m"] * scale + 6, cy - end["y_m"] * scale + 6, fill="#df7c52", outline="")
+        canvas.create_text(18, 18, anchor="nw", fill=PALETTE["canvas_text"], text="Top-down trajectory preview")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
