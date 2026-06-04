@@ -79,6 +79,59 @@
       "Exhale"
     ],
     "blocks": 6,
+    "block_specs": [
+      {
+        "label": "Block 1",
+        "stimulus_types": [
+          "Audio-Tactile",
+          "Baseline",
+          "Catch"
+        ]
+      },
+      {
+        "label": "Block 2",
+        "stimulus_types": [
+          "Audio-Tactile",
+          "Baseline",
+          "Catch"
+        ]
+      },
+      {
+        "label": "Block 3",
+        "stimulus_types": [
+          "Audio-Tactile",
+          "Baseline",
+          "Catch"
+        ]
+      },
+      {
+        "label": "Block 4",
+        "stimulus_types": [
+          "Audio-Tactile",
+          "Baseline",
+          "Catch"
+        ]
+      },
+      {
+        "label": "Block 5",
+        "stimulus_types": [
+          "Audio-Tactile",
+          "Baseline",
+          "Catch"
+        ]
+      },
+      {
+        "label": "Block 6",
+        "stimulus_types": [
+          "Audio-Tactile",
+          "Baseline",
+          "Catch"
+        ]
+      }
+    ],
+    "trial_randomization_strategy": "no_immediate_repeats",
+    "block_order_randomization": "counterbalanced_rotation",
+    "max_consecutive_same_trial_type": 2,
     "participants": 50,
     "random_seed": 20250604
   }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import random
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ import numpy as np
 
 SUPPORTED_NOISE_TYPES = ("pink", "blue", "white", "brown")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
+SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
+SUPPORTED_TRIAL_RANDOMIZATION = ("balanced_shuffle", "no_immediate_repeats", "ordered")
+SUPPORTED_BLOCK_ORDER_RANDOMIZATION = ("counterbalanced_rotation", "seeded_random_permutation", "fixed")
 
 
 @dataclass
@@ -30,6 +34,12 @@ class NoiseDefinition:
     azimuth_deg: float = 0.0
     elevation_deg: float = 0.0
     gain: float = 1.0
+
+
+@dataclass
+class BlockSpec:
+    label: str
+    stimulus_types: list[str] = field(default_factory=lambda: ["Audio-Tactile", "Baseline", "Catch"])
 
 
 @dataclass
@@ -72,6 +82,10 @@ class ProtocolSpec:
     baseline_soa_values_ms: list[int] = field(default_factory=list)
     respiratory_phases: list[str] = field(default_factory=lambda: ["Inhale", "Exhale"])
     blocks: int = 6
+    block_specs: list[BlockSpec] = field(default_factory=list)
+    trial_randomization_strategy: str = "no_immediate_repeats"
+    block_order_randomization: str = "counterbalanced_rotation"
+    max_consecutive_same_trial_type: int = 2
     participants: int = 50
     random_seed: int = 20250604
 
@@ -117,7 +131,12 @@ def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
     custom_looming_files = _audio_file_specs_from_dicts(data.get("custom_looming_files", []))
     prestimulus_files = _audio_file_specs_from_dicts(data.get("prestimulus_files", []))
     trajectory = TrajectorySpec(**data.get("trajectory", {}))
-    protocol = ProtocolSpec(**data.get("protocol", {}))
+    protocol_data = dict(data.get("protocol", {}))
+    protocol_data["block_specs"] = [
+        BlockSpec(**item) if isinstance(item, dict) else BlockSpec(str(item))
+        for item in protocol_data.get("block_specs", [])
+    ]
+    protocol = ProtocolSpec(**protocol_data)
     return StimulusDesign(
         name=data.get("name", "Study 5 PPS design"),
         sofa_file=data.get("sofa_file", ""),
@@ -222,9 +241,52 @@ def validate_design(design: StimulusDesign) -> list[str]:
         warnings.append("At least one respiratory phase is required.")
     if p.blocks < 1:
         warnings.append("Block count must be at least 1.")
+    if p.trial_randomization_strategy not in SUPPORTED_TRIAL_RANDOMIZATION:
+        warnings.append(f"Unsupported trial randomization strategy: {p.trial_randomization_strategy}")
+    if p.block_order_randomization not in SUPPORTED_BLOCK_ORDER_RANDOMIZATION:
+        warnings.append(f"Unsupported block order randomization strategy: {p.block_order_randomization}")
+    if p.max_consecutive_same_trial_type < 1:
+        warnings.append("Maximum consecutive same trial type must be at least 1.")
+    block_specs = effective_block_specs(p)
+    if not block_specs:
+        warnings.append("At least one block must be defined.")
+    for block in block_specs:
+        if not block.label.strip():
+            warnings.append("A block is missing a label.")
+        if not block.stimulus_types:
+            warnings.append(f"{block.label or 'Block'} must include at least one stimulus type.")
+        for stimulus_type in block.stimulus_types:
+            if stimulus_type not in SUPPORTED_TRIAL_TYPES:
+                warnings.append(f"Unsupported stimulus type in {block.label}: {stimulus_type}")
+    required_types = {"Audio-Tactile"}
+    if p.include_baseline_trials:
+        required_types.add("Baseline")
+    if p.catch_trials_exact is not None and p.catch_trials_exact > 0:
+        required_types.add("Catch")
+    elif p.catch_trial_percentage > 0:
+        required_types.add("Catch")
+    available_types = {stimulus_type for block in block_specs for stimulus_type in block.stimulus_types}
+    missing_types = sorted(required_types - available_types)
+    if missing_types:
+        warnings.append(f"No block accepts required stimulus type(s): {', '.join(missing_types)}")
     if p.participants < 1:
         warnings.append("Participant count must be at least 1.")
     return warnings
+
+
+def effective_block_specs(protocol: ProtocolSpec) -> list[BlockSpec]:
+    if protocol.block_specs:
+        return [
+            BlockSpec(
+                label=block.label,
+                stimulus_types=[trial_type for trial_type in block.stimulus_types if trial_type],
+            )
+            for block in protocol.block_specs
+        ]
+    return [
+        BlockSpec(label=f"Block {idx + 1}", stimulus_types=["Audio-Tactile", "Baseline", "Catch"])
+        for idx in range(max(1, protocol.blocks))
+    ]
 
 
 def protocol_factor_pairs(protocol: ProtocolSpec) -> list[tuple[int, float]]:
@@ -328,19 +390,170 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     return rows
 
 
+def _condition_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        row.get("trial_type"),
+        row.get("tactile_site"),
+        row.get("motion_direction"),
+        row.get("phase"),
+        row.get("soa_ms"),
+        row.get("spatial_value_cm"),
+        row.get("noise_label"),
+    )
+
+
+def _violates_trial_type_run(candidate: dict[str, Any], ordered: list[dict[str, Any]], max_run: int) -> bool:
+    if max_run <= 0 or len(ordered) < max_run:
+        return False
+    trial_type = candidate.get("trial_type")
+    return all(row.get("trial_type") == trial_type for row in ordered[-max_run:])
+
+
+def _randomize_rows(rows: list[dict[str, Any]], protocol: ProtocolSpec, seed: int) -> list[dict[str, Any]]:
+    if protocol.trial_randomization_strategy == "ordered":
+        return list(rows)
+
+    rng = random.Random(seed)
+    remaining = list(rows)
+    rng.shuffle(remaining)
+    if protocol.trial_randomization_strategy == "balanced_shuffle":
+        return remaining
+
+    ordered: list[dict[str, Any]] = []
+    while remaining:
+        previous_key = _condition_key(ordered[-1]) if ordered else None
+        choice_index = None
+        for idx, row in enumerate(remaining):
+            if _violates_trial_type_run(row, ordered, protocol.max_consecutive_same_trial_type):
+                continue
+            if previous_key is not None and _condition_key(row) == previous_key:
+                continue
+            choice_index = idx
+            break
+        if choice_index is None:
+            for idx, row in enumerate(remaining):
+                if not _violates_trial_type_run(row, ordered, protocol.max_consecutive_same_trial_type):
+                    choice_index = idx
+                    break
+        if choice_index is None:
+            choice_index = 0
+        ordered.append(remaining.pop(choice_index))
+    return ordered
+
+
+def block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
+    protocol = design.protocol
+    blocks = effective_block_specs(protocol)
+    block_rows: dict[str, list[dict[str, Any]]] = {block.label: [] for block in blocks}
+    rows_by_type: dict[str, list[dict[str, Any]]] = {trial_type: [] for trial_type in SUPPORTED_TRIAL_TYPES}
+    for row in protocol_trial_rows(design):
+        rows_by_type.setdefault(str(row["trial_type"]), []).append(row)
+
+    for trial_type, rows in rows_by_type.items():
+        if not rows:
+            continue
+        eligible_blocks = [block for block in blocks if trial_type in block.stimulus_types]
+        if not eligible_blocks:
+            continue
+        shuffled = list(rows)
+        random.Random(protocol.random_seed + sum(ord(ch) for ch in trial_type)).shuffle(shuffled)
+        for idx, row in enumerate(shuffled):
+            min_count = min(len(block_rows[block.label]) for block in eligible_blocks)
+            candidates = [
+                block
+                for block in eligible_blocks
+                if len(block_rows[block.label]) == min_count
+            ]
+            block = candidates[idx % len(candidates)]
+            block_rows[block.label].append(dict(row))
+
+    scheduled: list[dict[str, Any]] = []
+    for block_index, block in enumerate(blocks, start=1):
+        randomized = _randomize_rows(
+            block_rows[block.label],
+            protocol,
+            seed=protocol.random_seed + block_index * 1009,
+        )
+        for trial_index, row in enumerate(randomized, start=1):
+            scheduled.append(
+                {
+                    "block_index": block_index,
+                    "block_label": block.label,
+                    "block_trial_index": trial_index,
+                    **row,
+                }
+            )
+    return scheduled
+
+
+def participant_block_orders(design: StimulusDesign) -> dict[str, list[str]]:
+    protocol = design.protocol
+    labels = [block.label for block in effective_block_specs(protocol)]
+    if not labels:
+        return {}
+
+    base_order = list(labels)
+    if protocol.block_order_randomization != "fixed":
+        random.Random(protocol.random_seed).shuffle(base_order)
+
+    orders: dict[str, list[str]] = {}
+    block_count = len(base_order)
+    for participant_index in range(1, protocol.participants + 1):
+        if protocol.block_order_randomization == "fixed":
+            order = list(labels)
+        elif protocol.block_order_randomization == "seeded_random_permutation":
+            order = list(labels)
+            random.Random(protocol.random_seed + participant_index * 7919).shuffle(order)
+        else:
+            shift = (participant_index - 1) % block_count
+            order = base_order[shift:] + base_order[:shift]
+            if ((participant_index - 1) // block_count) % 2 == 1:
+                order = list(reversed(order))
+        orders[f"P{participant_index:03d}"] = order
+    return orders
+
+
+def experiment_schedule_rows(design: StimulusDesign) -> list[dict[str, Any]]:
+    block_rows = block_trial_rows(design)
+    rows_by_block: dict[str, list[dict[str, Any]]] = {}
+    for row in block_rows:
+        rows_by_block.setdefault(str(row["block_label"]), []).append(row)
+
+    scheduled: list[dict[str, Any]] = []
+    for participant_id, order in participant_block_orders(design).items():
+        participant_index = int(participant_id[1:])
+        for block_position, block_label in enumerate(order, start=1):
+            for row in rows_by_block.get(block_label, []):
+                scheduled.append(
+                    {
+                        "participant_id": participant_id,
+                        "participant_index": participant_index,
+                        "participant_block_position": block_position,
+                        **row,
+                    }
+                )
+    return scheduled
+
+
 def protocol_summary(design: StimulusDesign) -> dict[str, int]:
-    rows = protocol_trial_rows(design)
+    rows = block_trial_rows(design)
     audio_tactile = sum(1 for row in rows if row["trial_type"] == "Audio-Tactile")
     baseline = sum(1 for row in rows if row["trial_type"] == "Baseline")
     catch = sum(1 for row in rows if row["trial_type"] == "Catch")
     total = len(rows)
-    blocks = max(1, design.protocol.blocks)
+    blocks = max(1, len(effective_block_specs(design.protocol)))
+    block_counts: dict[str, int] = {}
+    for row in rows:
+        block_counts[str(row["block_label"])] = block_counts.get(str(row["block_label"]), 0) + 1
     return {
         "audio_tactile_trials": audio_tactile,
         "baseline_trials": baseline,
         "catch_trials": catch,
         "total_trials": total,
-        "trials_per_block": int(math.ceil(total / blocks)),
+        "blocks": blocks,
+        "trials_per_block": max(block_counts.values(), default=int(math.ceil(total / blocks))),
+        "min_trials_per_block": min(block_counts.values(), default=0),
+        "max_trials_per_block": max(block_counts.values(), default=0),
         "participants": design.protocol.participants,
         "total_participant_trials": total * design.protocol.participants,
     }
@@ -348,8 +561,14 @@ def protocol_summary(design: StimulusDesign) -> dict[str, int]:
 
 def export_protocol_csv(design: StimulusDesign, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    rows = protocol_trial_rows(design)
+    rows = experiment_schedule_rows(design)
     fieldnames = [
+        "participant_id",
+        "participant_index",
+        "participant_block_position",
+        "block_index",
+        "block_label",
+        "block_trial_index",
         "trial_type",
         "repetition",
         "tactile_site",

@@ -7,11 +7,15 @@ import pytest
 from peripersonal_space_toolkit import designer_app
 from peripersonal_space_toolkit.design import (
     AudioFileSpec,
+    BlockSpec,
+    block_trial_rows,
     default_design,
     design_from_dict,
+    experiment_schedule_rows,
     export_protocol_csv,
     export_trajectory_csv,
     load_design,
+    participant_block_orders,
     protocol_summary,
     save_design,
     trajectory_points,
@@ -98,6 +102,57 @@ def test_protocol_can_use_full_factorial_soa_by_spatial_values():
     summary = protocol_summary(design)
     assert summary["audio_tactile_trials"] == 6
     assert summary["total_trials"] == 6
+
+
+def test_block_specs_partition_trial_pool_by_stimulus_type():
+    design = default_design()
+    design.noises = design.noises[:1]
+    design.protocol.repetitions_per_condition = 1
+    design.protocol.soa_values_ms = [100, 300]
+    design.protocol.spatial_values_cm = [80.0, 40.0]
+    design.protocol.respiratory_phases = ["Any"]
+    design.protocol.participants = 3
+    design.protocol.block_specs = [
+        BlockSpec("Multisensory", ["Audio-Tactile"]),
+        BlockSpec("Baseline", ["Baseline"]),
+        BlockSpec("Catch", ["Catch"]),
+    ]
+
+    rows = block_trial_rows(design)
+    by_block = {}
+    for row in rows:
+        by_block.setdefault(row["block_label"], set()).add(row["trial_type"])
+
+    assert by_block["Multisensory"] == {"Audio-Tactile"}
+    assert by_block["Baseline"] == {"Baseline"}
+    assert by_block["Catch"] == {"Catch"}
+    assert len(rows) == protocol_summary(design)["total_trials"]
+
+
+def test_participant_block_order_is_randomized_but_block_contents_are_fixed():
+    design = default_design()
+    design.noises = design.noises[:1]
+    design.protocol.participants = 4
+    design.protocol.block_specs = [
+        BlockSpec("Near", ["Audio-Tactile", "Catch"]),
+        BlockSpec("Baseline", ["Baseline"]),
+        BlockSpec("Far", ["Audio-Tactile", "Catch"]),
+    ]
+    design.protocol.block_order_randomization = "counterbalanced_rotation"
+
+    orders = participant_block_orders(design)
+    assert len({tuple(order) for order in orders.values()}) > 1
+    assert {tuple(sorted(order)) for order in orders.values()} == {("Baseline", "Far", "Near")}
+
+    fixed_counts = {}
+    for row in block_trial_rows(design):
+        fixed_counts[row["block_label"]] = fixed_counts.get(row["block_label"], 0) + 1
+    for participant_id in orders:
+        participant_rows = [row for row in experiment_schedule_rows(design) if row["participant_id"] == participant_id]
+        participant_counts = {}
+        for row in participant_rows:
+            participant_counts[row["block_label"]] = participant_counts.get(row["block_label"], 0) + 1
+        assert participant_counts == fixed_counts
 
 
 def test_all_study_templates_load_and_summarize():

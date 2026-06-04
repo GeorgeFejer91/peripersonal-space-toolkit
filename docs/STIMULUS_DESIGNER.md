@@ -19,7 +19,7 @@ pps-design
 The designer is split into two main tabs:
 
 - `Stimulus Design`: SOFA/HRIR source, noise definitions, azimuth/elevation orientations, custom looming WAV preloads, custom prestimulus WAV preloads, and looming trajectory preview.
-- `Trial Design`: repetitions, SOA values, spatial values, auditory motion labels, tactile sites, baseline/catch-trial settings, respiratory phases, blocks, participants, and seed.
+- `Trial Design`: repetitions, SOA values, spatial values, auditory motion labels, tactile sites, baseline/catch-trial settings, respiratory phases, block composition, randomization strategy, participants, and seed.
 
 The designer currently covers:
 
@@ -31,6 +31,9 @@ The designer currently covers:
 - custom prestimulus files, such as 4-second breathing or instruction chunks, stored as named preload paths with target duration
 - looming trajectory radius, path direction, path length, propagation speed, start/end azimuth, elevation, and lead/tail padding
 - protocol schedule controls for repetitions per condition, SOA values, spatial values, catch-trial percentage, respiratory phases, blocks, participants, and random seed
+- block design controls that define which stimulus types are allowed in each block: audio-tactile, baseline, and catch
+- seeded trial randomization with balanced shuffle, no-immediate-repeat, or ordered strategies
+- participant-level block order assignment using fixed order, seeded random permutation, or counterbalanced rotation
 - auditory motion directions, tactile body sites, baseline-specific SOAs, and exact catch-trial counts for paradigms that report fixed trial counts
 - preloadable published-study templates with verification status and citation metadata
 - paired SOA/spatial values for distance-at-tactile designs, or full-factorial SOA x spatial designs for broader PPS variants
@@ -73,5 +76,7 @@ The script opens the designer, captures `Stimulus Design` and `Trial Design`, wr
 `pps-generate` remains the locked Study 5 replication path. The designer adds a configurable layer for future variants and pilot work. Designs are explicit JSON artifacts so changes to azimuth, radius, direction, path length, or speed can be reviewed before they are used in a generated stimulus set.
 
 The protocol CSV export materializes the requested trial family before audio generation: audio-tactile rows, optional tactile-only baselines, and catch trials computed from the target catch percentage.
+
+Block contents are generated once from the saved design seed. The same block definitions and within-block trial orders are reused for every participant; participant schedules differ by block order according to the selected block-order randomization strategy. This supports the common cognitive-neuroscience pattern of fixed reproducible blocks with participant-level order counterbalancing.
 
 Templates marked `partial` identify a published paradigm and preload its core structure, but should not be treated as exact replications until the original paper/protocol has been checked for every field.

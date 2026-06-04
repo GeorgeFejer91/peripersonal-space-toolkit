@@ -9,12 +9,16 @@ from tkinter import filedialog, messagebox, ttk
 
 from .design import (
     AudioFileSpec,
+    BlockSpec,
     NoiseDefinition,
     ProtocolSpec,
+    SUPPORTED_BLOCK_ORDER_RANDOMIZATION,
+    SUPPORTED_TRIAL_RANDOMIZATION,
     StimulusDesign,
     TrajectorySpec,
     audio_file_summary,
     default_design,
+    effective_block_specs,
     export_protocol_csv,
     export_trajectory_csv,
     load_design,
@@ -53,6 +57,7 @@ class StimulusDesignerApp:
         self.design_path = design_path
         self.design = load_design(design_path) if design_path.exists() else default_design()
         self.noises: list[NoiseDefinition] = list(self.design.noises)
+        self.block_specs: list[BlockSpec] = effective_block_specs(self.design.protocol)
         self.custom_looming_files: list[AudioFileSpec] = list(self.design.custom_looming_files)
         self.prestimulus_files: list[AudioFileSpec] = list(self.design.prestimulus_files)
         self.templates: list[StudyTemplate] = load_templates(TEMPLATE_DIR)
@@ -99,9 +104,16 @@ class StimulusDesignerApp:
             "baseline_soa_values_ms": tk.StringVar(),
             "respiratory_phases": tk.StringVar(),
             "blocks": tk.StringVar(),
+            "trial_randomization_strategy": tk.StringVar(),
+            "block_order_randomization": tk.StringVar(),
+            "max_consecutive_same_trial_type": tk.StringVar(),
             "participants": tk.StringVar(),
             "random_seed": tk.StringVar(),
         }
+        self.block_label_var = tk.StringVar()
+        self.block_audio_tactile_var = tk.BooleanVar(value=True)
+        self.block_baseline_var = tk.BooleanVar(value=True)
+        self.block_catch_var = tk.BooleanVar(value=True)
         self.pair_spatial_values_var = tk.BooleanVar()
         self.include_baseline_var = tk.BooleanVar()
 
@@ -198,9 +210,11 @@ class StimulusDesignerApp:
     def _build_ui(self) -> None:
         outer = ttk.Frame(self.root, padding=8)
         outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
 
         header = ttk.LabelFrame(outer, text="Design")
-        header.pack(fill="x")
+        header.grid(row=0, column=0, sticky="ew")
         ttk.Label(header, text="Name").grid(row=0, column=0, sticky="w", padx=6, pady=4)
         ttk.Entry(header, textvariable=self.name_var, width=44).grid(row=0, column=1, sticky="ew", padx=6, pady=4)
         ttk.Label(header, text="Preload").grid(row=0, column=2, sticky="w", padx=6, pady=4)
@@ -217,7 +231,7 @@ class StimulusDesignerApp:
         header.columnconfigure(3, weight=2)
 
         notebook = ttk.Notebook(outer)
-        notebook.pack(fill="both", expand=True, pady=(8, 6))
+        notebook.grid(row=1, column=0, sticky="nsew", pady=(8, 6))
 
         stimulus_tab = ttk.Frame(notebook, padding=6)
         trial_tab = ttk.Frame(notebook, padding=6)
@@ -238,7 +252,7 @@ class StimulusDesignerApp:
         self._build_protocol_panel(trial_tab)
 
         footer = ttk.Frame(outer)
-        footer.pack(fill="x")
+        footer.grid(row=2, column=0, sticky="ew")
         ttk.Label(footer, textvariable=self.status_var).pack(side="left", fill="x", expand=True)
         ttk.Button(footer, text="Load File", command=self._load_clicked).pack(side="right", padx=4)
         ttk.Button(footer, text="Save As", command=self._save_clicked).pack(side="right", padx=4)
@@ -392,12 +406,76 @@ class StimulusDesignerApp:
             command=self._update_protocol_summary,
         ).grid(row=6, column=2, columnspan=2, sticky="w", padx=4, pady=(8, 2))
 
-        self.protocol_tree = ttk.Treeview(panel, columns=("metric", "value"), show="headings", height=7)
+        strategy = ttk.Frame(panel)
+        strategy.pack(fill="x", padx=8, pady=(0, 6))
+        ttk.Label(strategy, text="Trial randomization").grid(row=0, column=0, sticky="w", padx=4, pady=3)
+        ttk.Combobox(
+            strategy,
+            textvariable=self.protocol_vars["trial_randomization_strategy"],
+            values=SUPPORTED_TRIAL_RANDOMIZATION,
+            state="readonly",
+            width=22,
+        ).grid(row=0, column=1, sticky="ew", padx=4, pady=3)
+        ttk.Label(strategy, text="Block order").grid(row=0, column=2, sticky="w", padx=4, pady=3)
+        ttk.Combobox(
+            strategy,
+            textvariable=self.protocol_vars["block_order_randomization"],
+            values=SUPPORTED_BLOCK_ORDER_RANDOMIZATION,
+            state="readonly",
+            width=24,
+        ).grid(row=0, column=3, sticky="ew", padx=4, pady=3)
+        ttk.Label(strategy, text="Max same type").grid(row=0, column=4, sticky="w", padx=4, pady=3)
+        ttk.Spinbox(
+            strategy,
+            textvariable=self.protocol_vars["max_consecutive_same_trial_type"],
+            from_=1,
+            to=20,
+            increment=1,
+            width=5,
+            command=self._update_protocol_summary,
+        ).grid(row=0, column=5, sticky="w", padx=4, pady=3)
+        strategy.columnconfigure(1, weight=1)
+        strategy.columnconfigure(3, weight=1)
+        self.protocol_vars["trial_randomization_strategy"].trace_add("write", lambda *_: self._update_protocol_summary())
+        self.protocol_vars["block_order_randomization"].trace_add("write", lambda *_: self._update_protocol_summary())
+        self.protocol_vars["max_consecutive_same_trial_type"].trace_add("write", lambda *_: self._update_protocol_summary())
+
+        self._build_block_design_panel(panel)
+
+        self.protocol_tree = ttk.Treeview(panel, columns=("metric", "value"), show="headings", height=5)
         self.protocol_tree.heading("metric", text="Metric")
         self.protocol_tree.heading("value", text="Count")
         self.protocol_tree.column("metric", width=150, anchor="w")
         self.protocol_tree.column("value", width=90, anchor="center")
         self.protocol_tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+    def _build_block_design_panel(self, parent: ttk.Frame) -> None:
+        panel = ttk.LabelFrame(parent, text="Block Design")
+        panel.pack(fill="x", padx=8, pady=(0, 8))
+
+        self.block_tree = ttk.Treeview(
+            panel,
+            columns=("label", "types"),
+            show="headings",
+            height=3,
+        )
+        self.block_tree.heading("label", text="Block")
+        self.block_tree.heading("types", text="Stimulus types")
+        self.block_tree.column("label", width=150, anchor="w")
+        self.block_tree.column("types", width=420, anchor="w")
+        self.block_tree.grid(row=0, column=0, columnspan=6, sticky="ew", padx=8, pady=6)
+        self.block_tree.bind("<<TreeviewSelect>>", self._block_selected)
+
+        ttk.Label(panel, text="Label").grid(row=1, column=0, sticky="w", padx=8, pady=3)
+        ttk.Entry(panel, textvariable=self.block_label_var, width=18).grid(row=2, column=0, sticky="ew", padx=8, pady=3)
+        ttk.Checkbutton(panel, text="Audio-tactile", variable=self.block_audio_tactile_var).grid(row=2, column=1, sticky="w", padx=4, pady=3)
+        ttk.Checkbutton(panel, text="Baseline", variable=self.block_baseline_var).grid(row=2, column=2, sticky="w", padx=4, pady=3)
+        ttk.Checkbutton(panel, text="Catch", variable=self.block_catch_var).grid(row=2, column=3, sticky="w", padx=4, pady=3)
+        ttk.Button(panel, text="Add / Update", command=self._add_or_update_block).grid(row=2, column=4, sticky="ew", padx=4, pady=3)
+        ttk.Button(panel, text="Remove", command=self._remove_block).grid(row=2, column=5, sticky="ew", padx=(4, 8), pady=3)
+        ttk.Button(panel, text="Reset From Count", command=self._reset_blocks_from_count).grid(row=3, column=4, columnspan=2, sticky="e", padx=8, pady=(0, 6))
+        panel.columnconfigure(0, weight=1)
+        panel.columnconfigure(4, weight=0)
 
     def _build_trajectory_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.LabelFrame(parent, text="Looming Trajectory")
@@ -462,12 +540,17 @@ class StimulusDesignerApp:
         self.protocol_vars["baseline_soa_values_ms"].set(", ".join(str(value) for value in protocol.baseline_soa_values_ms))
         self.protocol_vars["respiratory_phases"].set(", ".join(protocol.respiratory_phases))
         self.protocol_vars["blocks"].set(str(protocol.blocks))
+        self.protocol_vars["trial_randomization_strategy"].set(protocol.trial_randomization_strategy)
+        self.protocol_vars["block_order_randomization"].set(protocol.block_order_randomization)
+        self.protocol_vars["max_consecutive_same_trial_type"].set(str(protocol.max_consecutive_same_trial_type))
         self.protocol_vars["participants"].set(str(protocol.participants))
         self.protocol_vars["random_seed"].set(str(protocol.random_seed))
         self.pair_spatial_values_var.set(protocol.pair_spatial_values_with_soas)
         self.include_baseline_var.set(protocol.include_baseline_trials)
+        self.block_specs = effective_block_specs(protocol)
         self._refresh_noise_tree()
         self._refresh_audio_preload_tree()
+        self._refresh_block_tree()
         self._update_protocol_summary()
 
     def _refresh_noise_tree(self) -> None:
@@ -509,6 +592,21 @@ class StimulusDesignerApp:
                         asset.path,
                     ),
                 )
+
+    def _refresh_block_tree(self) -> None:
+        for item in self.block_tree.get_children():
+            self.block_tree.delete(item)
+        for idx, block in enumerate(self.block_specs):
+            self.block_tree.insert(
+                "",
+                "end",
+                iid=str(idx),
+                values=(block.label, ", ".join(block.stimulus_types)),
+            )
+        self.protocol_vars["blocks"].set(str(len(self.block_specs)))
+        if self.block_specs and not self.block_tree.selection():
+            self.block_tree.selection_set("0")
+            self._block_selected()
 
     def _parse_float(self, value: str, label: str) -> float:
         try:
@@ -568,7 +666,11 @@ class StimulusDesignerApp:
             include_baseline_trials=self.include_baseline_var.get(),
             baseline_soa_values_ms=self._parse_int_list(self.protocol_vars["baseline_soa_values_ms"].get(), "Baseline SOAs"),
             respiratory_phases=self._parse_string_list(self.protocol_vars["respiratory_phases"].get()),
-            blocks=self._parse_int(self.protocol_vars["blocks"].get(), "Blocks"),
+            blocks=len(self.block_specs) or self._parse_int(self.protocol_vars["blocks"].get(), "Blocks"),
+            block_specs=list(self.block_specs),
+            trial_randomization_strategy=self.protocol_vars["trial_randomization_strategy"].get(),
+            block_order_randomization=self.protocol_vars["block_order_randomization"].get(),
+            max_consecutive_same_trial_type=self._parse_int(self.protocol_vars["max_consecutive_same_trial_type"].get(), "Max same type"),
             participants=self._parse_int(self.protocol_vars["participants"].get(), "Participants"),
             random_seed=self._parse_int(self.protocol_vars["random_seed"].get(), "Seed"),
         )
@@ -737,6 +839,73 @@ class StimulusDesignerApp:
             messagebox.showinfo("Audio preload", msg)
             self.status_var.set("Audio preload duration matches target.")
 
+    def _block_selected(self, _event=None) -> None:
+        selected = self.block_tree.selection()
+        if not selected:
+            return
+        block = self.block_specs[int(selected[0])]
+        self.block_label_var.set(block.label)
+        self.block_audio_tactile_var.set("Audio-Tactile" in block.stimulus_types)
+        self.block_baseline_var.set("Baseline" in block.stimulus_types)
+        self.block_catch_var.set("Catch" in block.stimulus_types)
+
+    def _block_from_fields(self) -> BlockSpec:
+        stimulus_types: list[str] = []
+        if self.block_audio_tactile_var.get():
+            stimulus_types.append("Audio-Tactile")
+        if self.block_baseline_var.get():
+            stimulus_types.append("Baseline")
+        if self.block_catch_var.get():
+            stimulus_types.append("Catch")
+        label = self.block_label_var.get().strip() or f"Block {len(self.block_specs) + 1}"
+        return BlockSpec(label=label, stimulus_types=stimulus_types)
+
+    def _add_or_update_block(self) -> None:
+        block = self._block_from_fields()
+        if not block.stimulus_types:
+            messagebox.showerror("Invalid block", "Select at least one stimulus type for this block.")
+            return
+        selected = self.block_tree.selection()
+        if selected:
+            self.block_specs[int(selected[0])] = block
+            new_iid = selected[0]
+        else:
+            self.block_specs.append(block)
+            new_iid = str(len(self.block_specs) - 1)
+        self._refresh_block_tree()
+        self.block_tree.selection_set(new_iid)
+        self._update_protocol_summary()
+        self.status_var.set("Block definition updated.")
+
+    def _remove_block(self) -> None:
+        selected = self.block_tree.selection()
+        if not selected:
+            return
+        if len(self.block_specs) <= 1:
+            messagebox.showerror("Invalid block", "At least one block is required.")
+            return
+        del self.block_specs[int(selected[0])]
+        self._refresh_block_tree()
+        self._update_protocol_summary()
+        self.status_var.set("Block definition removed.")
+
+    def _reset_blocks_from_count(self) -> None:
+        try:
+            count = self._parse_int(self.protocol_vars["blocks"].get(), "Blocks")
+        except ValueError as exc:
+            messagebox.showerror("Invalid blocks", str(exc))
+            return
+        if count < 1:
+            messagebox.showerror("Invalid blocks", "Block count must be at least 1.")
+            return
+        self.block_specs = [
+            BlockSpec(f"Block {idx + 1}", ["Audio-Tactile", "Baseline", "Catch"])
+            for idx in range(count)
+        ]
+        self._refresh_block_tree()
+        self._update_protocol_summary()
+        self.status_var.set(f"Reset block design to {count} block(s).")
+
     def _browse_sofa(self) -> None:
         path = filedialog.askopenfilename(
             title="Select SOFA HRIR file",
@@ -818,7 +987,9 @@ class StimulusDesignerApp:
             ("Baseline trials", "baseline_trials"),
             ("Catch trials", "catch_trials"),
             ("Total trials", "total_trials"),
-            ("Trials per block", "trials_per_block"),
+            ("Blocks", "blocks"),
+            ("Max trials/block", "max_trials_per_block"),
+            ("Min trials/block", "min_trials_per_block"),
             ("Participants", "participants"),
             ("Participant-trials", "total_participant_trials"),
         ]
