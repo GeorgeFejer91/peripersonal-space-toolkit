@@ -16,21 +16,18 @@ const NEXT_STEP = {
   trials: "run",
   run: "review"
 };
-const LAYOUT_DEFAULTS = {
-  panelWidth: 520,
-  sideWidth: 460,
-  previewHeight: 360,
-  panelPadding: 13,
-  panelGap: 14
-};
-const LAYOUT_FIELDS = {
-  panelWidth: { id: "layout-panel-width", valueId: "layout-panel-width-value", min: 520, max: 900, unit: "px" },
-  sideWidth: { id: "layout-side-width", valueId: "layout-side-width-value", min: 360, max: 640, unit: "px" },
-  previewHeight: { id: "layout-preview-height", valueId: "layout-preview-height-value", min: 300, max: 620, unit: "px" },
-  panelPadding: { id: "layout-panel-padding", valueId: "layout-panel-padding-value", min: 9, max: 24, unit: "px" },
-  panelGap: { id: "layout-panel-gap", valueId: "layout-panel-gap-value", min: 8, max: 26, unit: "px" }
-};
 const LOCAL_BACKEND_DEFAULT = "http://127.0.0.1:8766";
+const PANEL_RESIZE_SNAP_PX = 8;
+const PANEL_HEIGHT_MIN = 150;
+const PANEL_HEIGHT_MAX = 1000;
+const SPLIT_DEFAULTS = {
+  sideWidth: 460,
+  ordersWidth: 420
+};
+const SPLIT_LIMITS = {
+  sideWidth: { min: 320, max: 760 },
+  ordersWidth: { min: 300, max: 760 }
+};
 const TRAJECTORY_FIELD_IDS = [
   "start-distance",
   "end-distance",
@@ -726,55 +723,154 @@ function updateActiveNav() {
   }
 }
 
-function loadLayoutSettings() {
-  const next = {};
-  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
-    next[key] = clampNumber(Number(localStorage.getItem(`ppsDashboard.${key}`)), field.min, field.max, LAYOUT_DEFAULTS[key]);
-  }
-  applyLayoutSettings(next);
+function loadResizableLayoutSettings() {
+  applySplitSetting("sideWidth", Number(localStorage.getItem(splitStorageKey("sideWidth"))) || SPLIT_DEFAULTS.sideWidth, false);
+  applySplitSetting("ordersWidth", Number(localStorage.getItem(splitStorageKey("ordersWidth"))) || SPLIT_DEFAULTS.ordersWidth, false);
+  initializeResizablePanels();
 }
 
-function applyLayoutSettings(layout) {
-  document.documentElement.style.setProperty("--main-column-min", `${layout.panelWidth}px`);
-  document.documentElement.style.setProperty("--side-column-width", `${layout.sideWidth}px`);
-  document.documentElement.style.setProperty("--preview-height", `${layout.previewHeight}px`);
-  document.documentElement.style.setProperty("--panel-padding", `${layout.panelPadding}px`);
-  document.documentElement.style.setProperty("--panel-gap", `${layout.panelGap}px`);
-  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
-    const value = layout[key];
-    $(field.id).value = String(value);
-    $(field.valueId).textContent = `${value}${field.unit}`;
-  }
-}
-
-function updateLayoutSetting(key, value) {
-  const next = currentLayoutSettings();
-  const field = LAYOUT_FIELDS[key];
-  next[key] = clampNumber(Number(value), field.min, field.max, LAYOUT_DEFAULTS[key]);
-  saveLayoutSettings(next);
-  applyLayoutSettings(next);
-}
-
-function currentLayoutSettings() {
-  const next = {};
-  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
-    next[key] = clampNumber(Number($(field.id).value), field.min, field.max, LAYOUT_DEFAULTS[key]);
-  }
-  return next;
-}
-
-function saveLayoutSettings(layout) {
-  for (const key of Object.keys(LAYOUT_FIELDS)) {
-    localStorage.setItem(`ppsDashboard.${key}`, String(layout[key]));
+function initializeResizablePanels() {
+  for (const panel of document.querySelectorAll("[data-resizable-panel]")) {
+    const panelId = panel.dataset.panelId || panel.id;
+    const storedHeight = Number(localStorage.getItem(panelStorageKey(panelId)));
+    if (Number.isFinite(storedHeight) && storedHeight > 0) {
+      setPanelHeight(panel, storedHeight, false);
+    }
+    if (panel.querySelector(":scope > .panel-resize-handle")) continue;
+    const handle = document.createElement("div");
+    handle.className = "panel-resize-handle";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "horizontal");
+    handle.setAttribute("aria-label", `Resize ${panelId.replaceAll("-", " ")} panel`);
+    handle.tabIndex = 0;
+    handle.addEventListener("pointerdown", (event) => startPanelResize(event, panel, handle));
+    handle.addEventListener("keydown", (event) => resizePanelFromKeyboard(event, panel));
+    panel.appendChild(handle);
   }
 }
 
-function resetLayoutSettings() {
-  for (const key of Object.keys(LAYOUT_FIELDS)) {
-    localStorage.removeItem(`ppsDashboard.${key}`);
+function setPanelHeight(panel, value, persist = true) {
+  const panelId = panel.dataset.panelId || panel.id;
+  const height = snapNumber(clampNumber(Number(value), PANEL_HEIGHT_MIN, PANEL_HEIGHT_MAX, PANEL_HEIGHT_MIN));
+  panel.style.setProperty("--panel-user-height", `${height}px`);
+  panel.classList.add("user-sized");
+  if (persist) {
+    localStorage.setItem(panelStorageKey(panelId), String(height));
   }
-  applyLayoutSettings({ ...LAYOUT_DEFAULTS });
-  showToast("Layout reset");
+  if (panel.dataset.panelId === "trajectory-preview") {
+    window.requestAnimationFrame(updateViewer);
+  }
+}
+
+function startPanelResize(event, panel, handle) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const startY = event.clientY;
+  const startHeight = panel.getBoundingClientRect().height;
+  document.body.classList.add("resizing-panel");
+  handle.classList.add("active");
+
+  const onMove = (moveEvent) => {
+    setPanelHeight(panel, startHeight + moveEvent.clientY - startY, false);
+  };
+  const onUp = (upEvent) => {
+    setPanelHeight(panel, startHeight + upEvent.clientY - startY, true);
+    document.body.classList.remove("resizing-panel");
+    handle.classList.remove("active");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function resizePanelFromKeyboard(event, panel) {
+  if (!["ArrowUp", "ArrowDown"].includes(event.key)) return;
+  event.preventDefault();
+  const direction = event.key === "ArrowDown" ? 1 : -1;
+  const currentHeight = panel.getBoundingClientRect().height;
+  setPanelHeight(panel, currentHeight + direction * PANEL_RESIZE_SNAP_PX, true);
+}
+
+function wireSplitters() {
+  for (const gutter of document.querySelectorAll("[data-resize-gutter]")) {
+    gutter.addEventListener("pointerdown", (event) => startSplitterResize(event, gutter));
+    gutter.addEventListener("keydown", (event) => resizeSplitterFromKeyboard(event, gutter));
+  }
+}
+
+function startSplitterResize(event, gutter) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  const key = splitKeyForGutter(gutter);
+  const container = gutter.closest(".grid, .table-grid");
+  const rect = container.getBoundingClientRect();
+  document.body.classList.add("resizing-layout");
+  gutter.classList.add("active");
+
+  const onMove = (moveEvent) => {
+    applySplitSetting(key, rect.right - moveEvent.clientX, false, rect);
+  };
+  const onUp = (upEvent) => {
+    applySplitSetting(key, rect.right - upEvent.clientX, true, rect);
+    document.body.classList.remove("resizing-layout");
+    gutter.classList.remove("active");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+}
+
+function resizeSplitterFromKeyboard(event, gutter) {
+  if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  event.preventDefault();
+  const key = splitKeyForGutter(gutter);
+  const direction = event.key === "ArrowLeft" ? 1 : -1;
+  const cssVar = key === "sideWidth" ? "--side-column-width" : "--orders-column-width";
+  const current = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar));
+  applySplitSetting(key, current + direction * PANEL_RESIZE_SNAP_PX, true, gutter.closest(".grid, .table-grid").getBoundingClientRect());
+}
+
+function applySplitSetting(key, value, persist = true, containerRect = null) {
+  const limits = splitLimitsFor(key, containerRect);
+  const width = snapNumber(clampNumber(Number(value), limits.min, limits.max, SPLIT_DEFAULTS[key]));
+  const cssVar = key === "sideWidth" ? "--side-column-width" : "--orders-column-width";
+  document.documentElement.style.setProperty(cssVar, `${width}px`);
+  if (persist) {
+    localStorage.setItem(splitStorageKey(key), String(width));
+  }
+  if (key === "sideWidth") {
+    window.requestAnimationFrame(updateViewer);
+  }
+}
+
+function splitLimitsFor(key, containerRect = null) {
+  const limits = SPLIT_LIMITS[key];
+  const width = containerRect ? containerRect.width : window.innerWidth - 260;
+  const reserved = key === "sideWidth" ? 430 : 320;
+  return {
+    min: limits.min,
+    max: Math.max(limits.min, Math.min(limits.max, width - reserved))
+  };
+}
+
+function splitKeyForGutter(gutter) {
+  return gutter.dataset.resizeGutter === "tables" ? "ordersWidth" : "sideWidth";
+}
+
+function splitStorageKey(key) {
+  return `ppsDashboard.split.${key}`;
+}
+
+function panelStorageKey(panelId) {
+  return `ppsDashboard.panelHeight.${panelId}`;
+}
+
+function snapNumber(value, step = PANEL_RESIZE_SNAP_PX) {
+  return Math.round(value / step) * step;
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -871,10 +967,7 @@ function wireEvents() {
   for (const id of TRAJECTORY_FIELD_IDS) {
     $(id).addEventListener("input", updateViewer);
   }
-  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
-    $(field.id).addEventListener("input", () => updateLayoutSetting(key, $(field.id).value));
-  }
-  $("layout-reset").addEventListener("click", resetLayoutSettings);
+  wireSplitters();
   for (const button of document.querySelectorAll("[data-preview-mode]")) {
     button.addEventListener("click", () => setPreviewMode(button.dataset.previewMode));
   }
@@ -919,6 +1012,6 @@ function reportError(error) {
 }
 
 loadApiBase();
-loadLayoutSettings();
+loadResizableLayoutSettings();
 wireEvents();
 loadState().catch(reportError);

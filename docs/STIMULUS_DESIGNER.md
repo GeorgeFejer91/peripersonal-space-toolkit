@@ -34,10 +34,10 @@ native Focus Mode backends; it does not move validated participant timing into
 browser JavaScript.
 
 The HTML dashboard is organized as a one-page workflow with a fixed floating
-left navigation rail. The rail includes persistent layout controls for main
-panel width, preview-column width, trajectory-preview height, panel padding,
-and panel spacing, plus a reset action, so researchers can resize the working
-panels without leaving the page.
+left navigation rail. The rail is navigation and companion-status only; panel
+sizing happens directly in the workspace through draggable snapping splitters
+and panel-edge handles, so researchers can resize the working panels without
+using abstract slider controls.
 
 The dashboard can also be served as a GitHub Pages site. In that mode, start
 `windows\Start_Website_Companion.bat` on the research PC and use the left-rail
@@ -81,6 +81,7 @@ The designer currently covers:
 - paper-level preload annotation in the profile bar, showing which published paper the selected profile is based on
 - `Citation` actions for the selected profile: show the source citation, save BibTeX, or save CSL JSON for citation managers
 - paired SOA/spatial values for distance-at-tactile designs, or full-factorial SOA x spatial designs for broader PPS variants
+- compact segmented `2D` / `3D` controls in both the Stimulus Design panel and the Trajectory Preview panel
 - one embedded trajectory preview with `2D bird's-eye` and `3D orbit` modes; 2D is the default, hides height, locks the camera to a top-down view, and lets researchers drag the start/end markers to update the matching distance and rotation controls
 - live stimulus-preview synchronization: editing trajectory fields updates the preview immediately, and 2D marker drags update the Stimulus Design fields immediately; Apply/Continue/Render still perform the backend save
 - resizable workspaces for stimulus controls, trajectory preview, protocol assembly, participant order previews, and runner readiness/review panes

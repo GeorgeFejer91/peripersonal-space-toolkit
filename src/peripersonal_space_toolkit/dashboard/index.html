@@ -21,20 +21,6 @@
         <a href="#run" data-step-link="run"><span>Run Prep</span><strong data-step-state="run">4</strong></a>
         <a href="#review" data-step-link="review"><span>Review</span><strong data-step-state="review">5</strong></a>
       </nav>
-      <div class="layout-controls" aria-label="Panel layout">
-        <div class="layout-title">Panel Layout</div>
-        <label for="layout-panel-width"><span>Panel width</span><output id="layout-panel-width-value"></output></label>
-        <input id="layout-panel-width" type="range" min="520" max="900" step="20">
-        <label for="layout-side-width"><span>Preview column</span><output id="layout-side-width-value"></output></label>
-        <input id="layout-side-width" type="range" min="360" max="640" step="10">
-        <label for="layout-preview-height"><span>Preview height</span><output id="layout-preview-height-value"></output></label>
-        <input id="layout-preview-height" type="range" min="300" max="620" step="10">
-        <label for="layout-panel-padding"><span>Panel padding</span><output id="layout-panel-padding-value"></output></label>
-        <input id="layout-panel-padding" type="range" min="9" max="24" step="1">
-        <label for="layout-panel-gap"><span>Panel spacing</span><output id="layout-panel-gap-value"></output></label>
-        <input id="layout-panel-gap" type="range" min="8" max="26" step="1">
-        <button id="layout-reset" type="button">Reset Layout</button>
-      </div>
       <div class="companion-panel" aria-label="Local companion backend">
         <div class="layout-title">Local Companion</div>
         <span id="connection-status" class="status-label required">checking</span>
@@ -64,7 +50,7 @@
 
       <section class="grid">
         <div class="main-column">
-          <section id="study" class="panel" data-step-panel="study">
+          <section id="study" class="panel" data-step-panel="study" data-resizable-panel data-panel-id="study">
             <div class="panel-heading">
               <div class="panel-title">Study Profile <span class="step-badge" data-step-badge="study"></span></div>
             </div>
@@ -82,13 +68,14 @@
             </div>
           </section>
 
-          <section id="stimulus" class="panel" data-step-panel="stimulus">
+          <section id="stimulus" class="panel" data-step-panel="stimulus" data-resizable-panel data-panel-id="stimulus">
             <div class="panel-heading">
               <div class="panel-title">Stimulus Design <span class="step-badge" data-step-badge="stimulus"></span></div>
-              <select id="preview-mode" aria-label="Preview mode">
-                <option value="2d">2D bird's-eye</option>
-                <option value="3d">3D orbit</option>
-              </select>
+              <input id="preview-mode" type="hidden" value="2d">
+              <div class="segmented-control" aria-label="Stimulus preview mode">
+                <button id="stimulus-mode-2d" type="button" class="mode-toggle active" data-preview-mode="2d">2D</button>
+                <button id="stimulus-mode-3d" type="button" class="mode-toggle" data-preview-mode="3d">3D</button>
+              </div>
             </div>
             <div class="split-fields">
               <div class="field-row">
@@ -160,7 +147,7 @@
             </div>
           </section>
 
-          <section id="trials" class="panel" data-step-panel="trials">
+          <section id="trials" class="panel" data-step-panel="trials" data-resizable-panel data-panel-id="trials">
             <div class="panel-heading">
               <div class="panel-title">Trial Assembly <span class="step-badge" data-step-badge="trials"></span></div>
               <button id="export-protocol-note" type="button" disabled>Preview Only</button>
@@ -202,8 +189,10 @@
           </section>
         </div>
 
+        <div class="workspace-splitter" data-resize-gutter="workspace" role="separator" aria-label="Resize preview column" aria-orientation="vertical" tabindex="0"></div>
+
         <aside class="side-column">
-          <section class="panel preview-panel" data-step-panel="stimulus">
+          <section class="panel preview-panel" data-step-panel="stimulus" data-resizable-panel data-panel-id="trajectory-preview">
             <div class="panel-heading">
               <div>Trajectory Preview</div>
               <div class="preview-actions">
@@ -217,7 +206,7 @@
             <iframe id="trajectory-frame" title="Trajectory preview" src="../viewer/index.html"></iframe>
           </section>
 
-          <section id="run" class="panel" data-step-panel="run">
+          <section id="run" class="panel" data-step-panel="run" data-resizable-panel data-panel-id="run">
             <div class="panel-heading">
               <div class="panel-title">Run Preparation <span class="step-badge" data-step-badge="run"></span></div>
               <span id="readiness-pill" class="status-label">checking</span>
@@ -238,7 +227,7 @@
             </div>
           </section>
 
-          <section id="review" class="panel" data-step-panel="review">
+          <section id="review" class="panel" data-step-panel="review" data-resizable-panel data-panel-id="review">
             <div class="panel-heading">
               <div class="panel-title">Review <span class="step-badge" data-step-badge="review"></span></div>
               <button id="refresh-jobs" type="button">Refresh Jobs</button>
@@ -250,7 +239,7 @@
       </section>
 
       <section class="table-grid">
-        <section class="panel" data-step-panel="trials">
+        <section class="panel" data-step-panel="trials" data-resizable-panel data-panel-id="trial-preview">
           <div class="panel-heading">
             <div>Trial Preview</div>
             <span id="trial-count" class="muted"></span>
@@ -274,7 +263,9 @@
           </div>
         </section>
 
-        <section class="panel" data-step-panel="run">
+        <div class="workspace-splitter table-splitter" data-resize-gutter="tables" role="separator" aria-label="Resize participant orders column" aria-orientation="vertical" tabindex="0"></div>
+
+        <section class="panel" data-step-panel="run" data-resizable-panel data-panel-id="participant-orders">
           <div class="panel-heading">
             <div>Participant Orders</div>
             <span id="order-count" class="muted"></span>
