@@ -33,6 +33,9 @@ let currentRadius = 1.1;
 const HEAD_CENTER_Y = 1.33;
 const DISTANCE_CM_MIN = 1;
 const DISTANCE_CM_MAX = 1000;
+const START_MARKER_COLOR = 0x4ecb71;
+const END_MARKER_COLOR = 0xe0524d;
+const ENDPOINT_2D_LIFT_M = 0.07;
 const pointer = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -198,6 +201,64 @@ function makeLabel(text, position) {
   return sprite;
 }
 
+function addEndpointHandle(handle, position, color, radius, is2D) {
+  const markerPosition = position.clone();
+  if (is2D) {
+    markerPosition.y += ENDPOINT_2D_LIFT_M;
+  }
+  const visualRadius = Math.max(0.052, radius * 0.052) * (is2D ? 1.2 : 1.0);
+  const hitRadius = visualRadius * (is2D ? 1.85 : 1.25);
+  const hitMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: is2D ? 0.18 : 0.01,
+    depthTest: !is2D,
+    depthWrite: false
+  });
+  const hitTarget = new THREE.Mesh(new THREE.SphereGeometry(hitRadius, 24, 16), hitMaterial);
+  hitTarget.position.copy(markerPosition);
+  hitTarget.userData.dragHandle = handle;
+  hitTarget.renderOrder = 80;
+  dynamicGroup.add(hitTarget);
+
+  const marker = new THREE.Mesh(
+    new THREE.SphereGeometry(visualRadius, 28, 18),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: is2D ? 0.22 : 0.08,
+      roughness: 0.42,
+      metalness: 0.0,
+      depthTest: !is2D,
+      depthWrite: !is2D
+    })
+  );
+  marker.position.copy(markerPosition);
+  marker.renderOrder = 100;
+  dynamicGroup.add(marker);
+
+  if (is2D) {
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(visualRadius * 1.35, visualRadius * 1.75, 36),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.58,
+        side: THREE.DoubleSide,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+    halo.position.copy(markerPosition);
+    halo.rotation.x = Math.PI / 2;
+    halo.renderOrder = 90;
+    dynamicGroup.add(halo);
+  }
+
+  dragHandles.set(handle, hitTarget);
+  return markerPosition;
+}
+
 function addCylinderBetween(start, end, radius, material) {
   const direction = new THREE.Vector3().subVectors(end, start);
   const length = direction.length();
@@ -276,20 +337,12 @@ function drawScene(payload) {
   const arrow = addArrowHead(start, end, pathMat);
   if (arrow) dynamicGroup.add(arrow);
 
-  const startMarker = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.045, radius * 0.045), 24, 16), new THREE.MeshStandardMaterial({ color: 0xa8d672 }));
-  startMarker.position.copy(start);
-  startMarker.userData.dragHandle = "start";
-  dragHandles.set("start", startMarker);
-  dynamicGroup.add(startMarker);
-  const endMarker = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.045, radius * 0.045), 24, 16), new THREE.MeshStandardMaterial({ color: 0xdf7c52 }));
-  endMarker.position.copy(end);
-  endMarker.userData.dragHandle = "end";
-  dragHandles.set("end", endMarker);
-  dynamicGroup.add(endMarker);
+  const startMarkerPosition = addEndpointHandle("start", start, START_MARKER_COLOR, radius, is2D);
+  const endMarkerPosition = addEndpointHandle("end", end, END_MARKER_COLOR, radius, is2D);
 
   const labelLift = is2D ? 0.02 : 0.08;
-  dynamicGroup.add(makeLabel("Start", start.clone().add(new THREE.Vector3(0.08, labelLift, 0))));
-  dynamicGroup.add(makeLabel("End", end.clone().add(new THREE.Vector3(0.08, labelLift, 0))));
+  dynamicGroup.add(makeLabel("Start", startMarkerPosition.clone().add(new THREE.Vector3(0.08, labelLift, 0))));
+  dynamicGroup.add(makeLabel("End", endMarkerPosition.clone().add(new THREE.Vector3(0.08, labelLift, 0))));
   dynamicGroup.add(makeLabel("+X right", new THREE.Vector3(radius * 1.18, 0.05, 0)));
   dynamicGroup.add(makeLabel("+Y front", new THREE.Vector3(0, 0.05, -radius * 1.18)));
   if (!is2D) {
@@ -320,6 +373,9 @@ function drawScene(payload) {
     path_length_m: payload.path_length_m.toFixed(3),
     camera_max_polar_angle: controls.maxPolarAngle.toFixed(6),
     drag_enabled: is2D,
+    drag_handles: [...dragHandles.keys()].sort(),
+    start_marker_color: "#4ecb71",
+    end_marker_color: "#e0524d",
     start_distance_cm: payload.controls?.start_distance_cm ?? "",
     end_distance_cm: payload.controls?.end_distance_cm ?? "",
     start_rotation_deg: payload.controls?.start_rotation_deg ?? "",
@@ -332,6 +388,9 @@ function drawScene(payload) {
   container.dataset.pathLengthM = window.__trajectoryViewerState.path_length_m;
   container.dataset.cameraMaxPolarAngle = window.__trajectoryViewerState.camera_max_polar_angle;
   container.dataset.dragEnabled = String(is2D);
+  container.dataset.dragHandles = window.__trajectoryViewerState.drag_handles.join(",");
+  container.dataset.startMarkerColor = window.__trajectoryViewerState.start_marker_color;
+  container.dataset.endMarkerColor = window.__trajectoryViewerState.end_marker_color;
   container.dataset.startDistanceCm = String(window.__trajectoryViewerState.start_distance_cm);
   container.dataset.endDistanceCm = String(window.__trajectoryViewerState.end_distance_cm);
   container.dataset.startRotationDeg = String(window.__trajectoryViewerState.start_rotation_deg);

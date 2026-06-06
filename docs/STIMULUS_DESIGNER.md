@@ -87,7 +87,7 @@ The designer currently covers:
 - `Citation` actions for the selected profile: show the source citation, save BibTeX, or save CSL JSON for citation managers
 - paired SOA/spatial values for distance-at-tactile designs, or full-factorial SOA x spatial designs for broader PPS variants
 - compact segmented `2D` / `3D` controls in both the Stimulus Design panel and the Trajectory Preview panel
-- one embedded trajectory preview with `2D bird's-eye` and `3D orbit` modes; 2D is the default, hides height, locks the camera to a top-down view, and lets researchers drag the start/end markers to update the matching distance and rotation controls
+- one embedded trajectory preview with `2D bird's-eye` and `3D orbit` modes; 2D is the default, hides height, locks the camera to a top-down view, and lets researchers drag the green start marker and red end marker to update the matching distance and rotation controls
 - live stimulus-preview synchronization: editing trajectory fields updates the preview immediately, and 2D marker drags update the Stimulus Design fields immediately; Apply/Continue/Render still perform the backend save
 - resizable workspaces for stimulus controls, trajectory preview, protocol assembly, participant order previews, and runner readiness/review panes
 - repeatable settings save/load

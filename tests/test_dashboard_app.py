@@ -83,15 +83,21 @@ def _wait_job(client: TestClient, job_id: str) -> dict:
 
 def test_dashboard_static_assets_are_packaged():
     dashboard_files = files("peripersonal_space_toolkit.dashboard")
+    viewer_files = files("peripersonal_space_toolkit.viewer")
     assert dashboard_files.joinpath("index.html").is_file()
     assert dashboard_files.joinpath("styles.css").is_file()
     assert dashboard_files.joinpath("app.js").is_file()
+    assert viewer_files.joinpath("trajectory-viewer.js").is_file()
 
     html = dashboard_files.joinpath("index.html").read_text(encoding="utf-8")
+    viewer_js = viewer_files.joinpath("trajectory-viewer.js").read_text(encoding="utf-8")
     assert 'href="styles.css"' in html
     assert 'src="app.js"' in html
     assert 'src="../viewer/index.html"' in html
     assert 'id="audio-file-input"' in html
+    assert "START_MARKER_COLOR" in viewer_js
+    assert "END_MARKER_COLOR" in viewer_js
+    assert "end_marker_color" in viewer_js
     assert "/api/" not in html
 
 
