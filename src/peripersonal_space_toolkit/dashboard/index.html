@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PPS Local Dashboard</title>
+  <link rel="icon" type="image/png" href="pps_toolkit_icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-name">PPS Toolkit</div>
+        <div class="brand-subtitle">Local researcher dashboard</div>
+      </div>
+      <nav aria-label="Dashboard sections">
+        <a href="#study" data-step-link="study"><span>Study</span><strong data-step-state="study">1</strong></a>
+        <a href="#stimulus" data-step-link="stimulus"><span>Stimulus</span><strong data-step-state="stimulus">2</strong></a>
+        <a href="#trials" data-step-link="trials"><span>Trials</span><strong data-step-state="trials">3</strong></a>
+        <a href="#run" data-step-link="run"><span>Run Prep</span><strong data-step-state="run">4</strong></a>
+        <a href="#review" data-step-link="review"><span>Review</span><strong data-step-state="review">5</strong></a>
+      </nav>
+      <div class="layout-controls" aria-label="Panel layout">
+        <div class="layout-title">Panel Layout</div>
+        <label for="layout-side-width"><span>Preview column</span><output id="layout-side-width-value"></output></label>
+        <input id="layout-side-width" type="range" min="360" max="640" step="10">
+        <label for="layout-preview-height"><span>Preview height</span><output id="layout-preview-height-value"></output></label>
+        <input id="layout-preview-height" type="range" min="300" max="620" step="10">
+      </div>
+      <div class="companion-panel" aria-label="Local companion backend">
+        <div class="layout-title">Local Companion</div>
+        <span id="connection-status" class="status-label required">checking</span>
+        <label for="backend-url">Backend URL</label>
+        <input id="backend-url" type="url" autocomplete="off">
+        <button id="connect-backend" type="button">Connect</button>
+        <a id="download-software" class="button-link" href="https://github.com/GeorgeFejer91/peripersonal-space-toolkit/archive/refs/heads/main.zip">Download Software</a>
+      </div>
+      <div class="rail-note">
+        <span>Qt UI remains available as</span>
+        <code>pps-design</code>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <div class="product-label">HTML dashboard</div>
+          <div id="design-title" class="design-title">Loading...</div>
+        </div>
+        <div class="top-actions">
+          <span id="workflow-pill" class="status-label">checking</span>
+          <button id="refresh-state" type="button">Refresh</button>
+          <button id="apply-design" type="button" class="primary">Apply Design</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="main-column">
+          <section id="study" class="panel" data-step-panel="study">
+            <div class="panel-heading">
+              <div class="panel-title">Study Profile <span class="step-badge" data-step-badge="study"></span></div>
+              <button id="load-template" type="button">Load Profile</button>
+            </div>
+            <div class="field-row">
+              <label for="template-select">Published preload</label>
+              <select id="template-select"></select>
+            </div>
+            <div id="profile-summary" class="summary-text"></div>
+            <div class="field-row">
+              <label for="design-name">Design name</label>
+              <input id="design-name" type="text" autocomplete="off">
+            </div>
+            <div class="step-footer">
+              <button type="button" class="primary" data-continue-step="study">Continue To Stimulus</button>
+            </div>
+          </section>
+
+          <section id="stimulus" class="panel" data-step-panel="stimulus">
+            <div class="panel-heading">
+              <div class="panel-title">Stimulus Design <span class="step-badge" data-step-badge="stimulus"></span></div>
+              <select id="preview-mode" aria-label="Preview mode">
+                <option value="2d">2D bird's-eye</option>
+                <option value="3d">3D orbit</option>
+              </select>
+            </div>
+            <div class="split-fields">
+              <div class="field-row">
+                <label for="start-distance">Start distance cm</label>
+                <input id="start-distance" type="number" min="1" max="1000" step="1">
+              </div>
+              <div class="field-row">
+                <label for="end-distance">End distance cm</label>
+                <input id="end-distance" type="number" min="1" max="1000" step="1">
+              </div>
+              <div class="field-row">
+                <label for="start-rotation">Start rotation deg</label>
+                <input id="start-rotation" type="number" min="0" max="360" step="1">
+              </div>
+              <div class="field-row">
+                <label for="end-rotation">End rotation deg</label>
+                <input id="end-rotation" type="number" min="0" max="360" step="1">
+              </div>
+              <div class="field-row">
+                <label for="movement-duration">Movement duration s</label>
+                <input id="movement-duration" type="number" min="0.1" max="30" step="0.1">
+              </div>
+              <div class="field-row">
+                <label for="start-hold">Start hold s</label>
+                <input id="start-hold" type="number" min="0" max="30" step="0.1">
+              </div>
+              <div class="field-row">
+                <label for="end-hold">End hold s</label>
+                <input id="end-hold" type="number" min="0" max="30" step="0.1">
+              </div>
+            </div>
+
+            <div class="table-toolbar">
+              <span>Noise definitions</span>
+              <button id="add-noise" type="button">Add Noise</button>
+            </div>
+            <table class="data-table" id="noise-table">
+              <thead>
+                <tr>
+                  <th>Label</th>
+                  <th>Type</th>
+                  <th>Azimuth</th>
+                  <th>Elevation</th>
+                  <th>Gain</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="table-toolbar">
+              <span>Custom audio files</span>
+              <button id="add-audio" type="button">Add Audio</button>
+            </div>
+            <table class="data-table" id="audio-table">
+              <thead>
+                <tr>
+                  <th>Use</th>
+                  <th>Label</th>
+                  <th>Path</th>
+                  <th>Target s</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="step-footer">
+              <button type="button" class="primary" data-continue-step="stimulus">Continue To Trials</button>
+            </div>
+          </section>
+
+          <section id="trials" class="panel" data-step-panel="trials">
+            <div class="panel-heading">
+              <div class="panel-title">Trial Assembly <span class="step-badge" data-step-badge="trials"></span></div>
+              <button id="export-protocol-note" type="button" disabled>Preview Only</button>
+            </div>
+            <div class="split-fields">
+              <div class="field-row">
+                <label for="repetitions">Repetitions</label>
+                <input id="repetitions" type="number" min="1" max="100" step="1">
+              </div>
+              <div class="field-row">
+                <label for="participants">Participants</label>
+                <input id="participants" type="number" min="1" max="500" step="1">
+              </div>
+              <div class="field-row">
+                <label for="blocks">Blocks</label>
+                <input id="blocks" type="number" min="1" max="100" step="1">
+              </div>
+              <div class="field-row">
+                <label for="catch-percent">Catch percent</label>
+                <input id="catch-percent" type="number" min="0" max="100" step="1">
+              </div>
+            </div>
+            <div class="field-row">
+              <label for="soa-values">SOA values ms</label>
+              <input id="soa-values" type="text" autocomplete="off">
+            </div>
+            <div class="field-row">
+              <label for="spatial-values">Spatial values cm</label>
+              <input id="spatial-values" type="text" autocomplete="off">
+            </div>
+            <div class="field-row inline-check">
+              <input id="pair-spatial" type="checkbox">
+              <label for="pair-spatial">Pair SOA and spatial values</label>
+            </div>
+            <div id="protocol-summary" class="summary-grid"></div>
+            <div class="step-footer">
+              <button type="button" class="primary" data-continue-step="trials">Continue To Run Prep</button>
+            </div>
+          </section>
+        </div>
+
+        <aside class="side-column">
+          <section class="panel preview-panel" data-step-panel="stimulus">
+            <div class="panel-heading">
+              <div>Trajectory Preview</div>
+              <div class="preview-actions">
+                <div class="segmented-control" aria-label="Trajectory preview mode">
+                  <button id="preview-mode-2d" type="button" class="mode-toggle active" data-preview-mode="2d">2D</button>
+                  <button id="preview-mode-3d" type="button" class="mode-toggle" data-preview-mode="3d">3D</button>
+                </div>
+                <button id="reset-camera" type="button">Reset Camera</button>
+              </div>
+            </div>
+            <iframe id="trajectory-frame" title="Trajectory preview" src="../viewer/index.html"></iframe>
+          </section>
+
+          <section id="run" class="panel" data-step-panel="run">
+            <div class="panel-heading">
+              <div class="panel-title">Run Preparation <span class="step-badge" data-step-badge="run"></span></div>
+              <span id="readiness-pill" class="status-label">checking</span>
+            </div>
+            <div class="field-row">
+              <label for="participant-id">Participant ID</label>
+              <input id="participant-id" type="text" autocomplete="off">
+            </div>
+            <div id="readiness-list" class="status-list"></div>
+            <div class="action-row">
+              <button id="render-action" type="button">Render</button>
+              <button id="prepare-action" type="button">Prepare</button>
+              <button id="stress-action" type="button">Stress Audio</button>
+              <button id="focus-action" type="button" class="primary">Start Native Focus</button>
+            </div>
+            <div class="step-footer">
+              <button type="button" class="primary" data-continue-step="run">Continue To Review</button>
+            </div>
+          </section>
+
+          <section id="review" class="panel" data-step-panel="review">
+            <div class="panel-heading">
+              <div class="panel-title">Review <span class="step-badge" data-step-badge="review"></span></div>
+              <button id="refresh-jobs" type="button">Refresh Jobs</button>
+            </div>
+            <div id="session-summary" class="summary-text"></div>
+            <div id="job-list" class="job-list"></div>
+          </section>
+        </aside>
+      </section>
+
+      <section class="table-grid">
+        <section class="panel" data-step-panel="trials">
+          <div class="panel-heading">
+            <div>Trial Preview</div>
+            <span id="trial-count" class="muted"></span>
+          </div>
+          <div class="scroll-table">
+            <table class="data-table" id="trial-table">
+              <thead>
+                <tr>
+                  <th>Block</th>
+                  <th>Trial</th>
+                  <th>Type</th>
+                  <th>Phase</th>
+                  <th>SOA</th>
+                  <th>Space</th>
+                  <th>Site</th>
+                  <th>Noise</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" data-step-panel="run">
+          <div class="panel-heading">
+            <div>Participant Orders</div>
+            <span id="order-count" class="muted"></span>
+          </div>
+          <div class="scroll-table compact">
+            <table class="data-table" id="order-table">
+              <thead>
+                <tr>
+                  <th>Participant</th>
+                  <th>Block order</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

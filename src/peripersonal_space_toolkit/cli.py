@@ -63,6 +63,12 @@ def run(argv: list[str] | None = None) -> int:
     return runner.main(argv)
 
 
+def render_design(argv: list[str] | None = None) -> int:
+    from . import render_backend
+
+    return render_backend.main(argv)
+
+
 def decode(argv: list[str] | None = None) -> int:
     from . import decoder
 

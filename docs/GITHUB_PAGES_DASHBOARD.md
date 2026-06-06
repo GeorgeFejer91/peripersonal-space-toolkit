@@ -1,0 +1,59 @@
+# GitHub Pages Dashboard
+
+The HTML dashboard can be published as a static GitHub Pages interface while the
+experiment software runs locally on the research PC.
+
+## Architecture
+
+- GitHub Pages serves the visible dashboard UI.
+- The local companion backend runs on the PC at `http://127.0.0.1:8766`.
+- The hosted page calls the companion API for design state, render jobs, session
+  preparation, audio stress tests, and native Focus Mode launch.
+- Browser JavaScript does not own experiment timing. Timing-sensitive participant
+  runs stay native/Python-backed.
+
+## Publish
+
+Enable GitHub Pages for the repository branch root. The root `index.html`
+redirects to:
+
+```text
+src/peripersonal_space_toolkit/dashboard/index.html
+```
+
+The dashboard uses relative static paths, so the same files work when served
+from GitHub Pages or from the local FastAPI app.
+
+## Use On A Research PC
+
+Install the toolkit once:
+
+```powershell
+.\windows\Setup_Windows_App.ps1
+```
+
+Start the local companion backend:
+
+```bat
+windows\Start_Website_Companion.bat
+```
+
+Then open the GitHub Pages dashboard. The left rail shows the local companion
+status and lets the user set the backend URL if a non-default port is used.
+
+## Safety Boundary
+
+A public website cannot silently install Python, packages, audio drivers, or
+experiment dependencies. The dashboard includes a `Download Software` link for
+the repository package, but setup still happens through the local Windows setup
+script or an installer in a future release.
+
+The companion backend allows the default project GitHub Pages origin
+(`https://georgefejer91.github.io`). For forks or institutional Pages domains,
+start the companion with an explicit origin:
+
+```bat
+windows\Start_Website_Companion.bat --web-origin https://example.github.io
+```
+
+Use `--no-default-web-origin` if only a custom origin should be allowed.

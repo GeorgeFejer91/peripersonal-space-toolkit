@@ -15,9 +15,19 @@ import numpy as np
 
 SUPPORTED_NOISE_TYPES = ("pink", "blue", "white", "brown")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
+SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
 SUPPORTED_TRIAL_RANDOMIZATION = ("balanced_shuffle", "no_immediate_repeats", "ordered")
 SUPPORTED_BLOCK_ORDER_RANDOMIZATION = ("counterbalanced_rotation", "seeded_random_permutation", "fixed")
+DEFAULT_SOFA_FILE = "assets/0. Head-Related Impulse Response (HRIR) model/FABIAN_HRIR_measured_HATO_0.sofa"
+DEFAULT_TRAJECTORY_PLANE_HEIGHT_M = 0.0
+DEFAULT_TRAJECTORY_PLANE_LABEL = "listener head/ear center plane"
+DISTANCE_CM_MIN = 1.0
+DISTANCE_CM_MAX = 1000.0
+ROTATION_DEG_MIN = -180.0
+ROTATION_DEG_MAX = 180.0
+DISPLAY_ROTATION_DEG_MIN = 0.0
+DISPLAY_ROTATION_DEG_MAX = 360.0
 
 
 @dataclass
@@ -47,6 +57,13 @@ class TrajectorySpec:
     start_radius_m: float = 1.1
     end_radius_m: float = 0.1
     path_direction: str = "approach"
+    coordinate_mode: str = "polar"
+    start_x_m: float | None = None
+    start_y_m: float | None = None
+    start_z_m: float | None = None
+    end_x_m: float | None = None
+    end_y_m: float | None = None
+    end_z_m: float | None = None
     path_length_m: float = 1.0
     propagation_speed_mps: float = 1.0 / 3.0
     azimuth_start_deg: float = 0.0
@@ -93,7 +110,11 @@ class ProtocolSpec:
 @dataclass
 class StimulusDesign:
     name: str = "Study 5 PPS design"
-    sofa_file: str = ""
+    study_profile_id: str = ""
+    study_profile_title: str = ""
+    study_profile_notes: str = ""
+    study_profile_reference_parameters: dict[str, Any] = field(default_factory=dict)
+    sofa_file: str = DEFAULT_SOFA_FILE
     noises: list[NoiseDefinition] = field(default_factory=list)
     custom_looming_files: list[AudioFileSpec] = field(default_factory=list)
     prestimulus_files: list[AudioFileSpec] = field(default_factory=list)
@@ -103,6 +124,7 @@ class StimulusDesign:
 
 def default_design() -> StimulusDesign:
     return StimulusDesign(
+        sofa_file=DEFAULT_SOFA_FILE,
         noises=[
             NoiseDefinition("Pink frontal", "pink", 0.0),
             NoiseDefinition("Blue frontal", "blue", 0.0),
@@ -130,7 +152,13 @@ def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
     noises = [NoiseDefinition(**item) for item in data.get("noises", [])]
     custom_looming_files = _audio_file_specs_from_dicts(data.get("custom_looming_files", []))
     prestimulus_files = _audio_file_specs_from_dicts(data.get("prestimulus_files", []))
-    trajectory = TrajectorySpec(**data.get("trajectory", {}))
+    trajectory_data = dict(data.get("trajectory", {}))
+    if "coordinate_mode" not in trajectory_data and any(
+        key in trajectory_data
+        for key in ("start_x_m", "start_y_m", "start_z_m", "end_x_m", "end_y_m", "end_z_m")
+    ):
+        trajectory_data["coordinate_mode"] = "cartesian"
+    trajectory = TrajectorySpec(**trajectory_data)
     protocol_data = dict(data.get("protocol", {}))
     protocol_data["block_specs"] = [
         BlockSpec(**item) if isinstance(item, dict) else BlockSpec(str(item))
@@ -139,7 +167,11 @@ def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
     protocol = ProtocolSpec(**protocol_data)
     return StimulusDesign(
         name=data.get("name", "Study 5 PPS design"),
-        sofa_file=data.get("sofa_file", ""),
+        study_profile_id=data.get("study_profile_id", ""),
+        study_profile_title=data.get("study_profile_title", ""),
+        study_profile_notes=data.get("study_profile_notes", ""),
+        study_profile_reference_parameters=dict(data.get("study_profile_reference_parameters", {})),
+        sofa_file=data.get("sofa_file") or DEFAULT_SOFA_FILE,
         noises=noises,
         custom_looming_files=custom_looming_files,
         prestimulus_files=prestimulus_files,
@@ -173,6 +205,87 @@ def audio_file_summary(path: Path) -> dict[str, Any]:
     }
 
 
+def _uses_cartesian_coordinates(spec: TrajectorySpec) -> bool:
+    fields = (spec.start_x_m, spec.start_y_m, spec.start_z_m, spec.end_x_m, spec.end_y_m, spec.end_z_m)
+    return spec.coordinate_mode == "cartesian" or any(value is not None for value in fields)
+
+
+def cartesian_to_spherical(x_m: float, y_m: float, z_m: float) -> dict[str, float]:
+    radius_m = math.sqrt(x_m**2 + y_m**2 + z_m**2)
+    horizontal_radius = math.sqrt(x_m**2 + y_m**2)
+    azimuth_deg = math.degrees(math.atan2(x_m, y_m)) if horizontal_radius else 0.0
+    elevation_deg = math.degrees(math.atan2(z_m, horizontal_radius)) if radius_m else 0.0
+    return {
+        "radius_m": radius_m,
+        "azimuth_deg": azimuth_deg,
+        "elevation_deg": elevation_deg,
+    }
+
+
+def spherical_to_cartesian(radius_m: float, azimuth_deg: float, elevation_deg: float) -> dict[str, float]:
+    az = math.radians(azimuth_deg)
+    el = math.radians(elevation_deg)
+    horizontal_radius = radius_m * math.cos(el)
+    return {
+        "x_m": horizontal_radius * math.sin(az),
+        "y_m": horizontal_radius * math.cos(az),
+        "z_m": radius_m * math.sin(el),
+    }
+
+
+def normalize_azimuth_deg(rotation_deg: float) -> float:
+    return ((rotation_deg + 180.0) % 360.0) - 180.0
+
+
+def azimuth_to_display_rotation_deg(azimuth_deg: float) -> float:
+    return azimuth_deg % 360.0
+
+
+def horizontal_point_from_distance_rotation(distance_cm: float, rotation_deg: float) -> dict[str, float]:
+    return point_from_distance_rotation_height(distance_cm, rotation_deg, 0.0)
+
+
+def point_from_distance_rotation_height(
+    distance_cm: float,
+    rotation_deg: float,
+    height_cm: float = 0.0,
+) -> dict[str, float]:
+    if not DISTANCE_CM_MIN <= distance_cm <= DISTANCE_CM_MAX:
+        raise ValueError(f"Distance must be between {DISTANCE_CM_MIN:g} and {DISTANCE_CM_MAX:g} cm.")
+    if not DISPLAY_ROTATION_DEG_MIN <= rotation_deg <= DISPLAY_ROTATION_DEG_MAX:
+        raise ValueError(
+            f"Rotation must be between {DISPLAY_ROTATION_DEG_MIN:g} and {DISPLAY_ROTATION_DEG_MAX:g} degrees."
+        )
+    if abs(height_cm) > distance_cm:
+        raise ValueError("Height from the head plane cannot be larger than the distance from the listener.")
+    radius_m = distance_cm / 100.0
+    z_m = height_cm / 100.0
+    horizontal_radius_m = math.sqrt(max(radius_m**2 - z_m**2, 0.0))
+    az = math.radians(normalize_azimuth_deg(rotation_deg))
+    return {
+        "x_m": horizontal_radius_m * math.sin(az),
+        "y_m": horizontal_radius_m * math.cos(az),
+        "z_m": z_m,
+    }
+
+
+def trajectory_endpoints_xyz(spec: TrajectorySpec) -> tuple[dict[str, float], dict[str, float]]:
+    if _uses_cartesian_coordinates(spec) and all(
+        value is not None
+        for value in (spec.start_x_m, spec.start_y_m, spec.start_z_m, spec.end_x_m, spec.end_y_m, spec.end_z_m)
+    ):
+        return (
+            {"x_m": float(spec.start_x_m), "y_m": float(spec.start_y_m), "z_m": float(spec.start_z_m)},
+            {"x_m": float(spec.end_x_m), "y_m": float(spec.end_y_m), "z_m": float(spec.end_z_m)},
+        )
+
+    az0, az1 = _default_azimuths_for_direction(spec)
+    return (
+        spherical_to_cartesian(spec.start_radius_m, az0, spec.elevation_deg),
+        spherical_to_cartesian(spec.end_radius_m, az1, spec.elevation_deg),
+    )
+
+
 def validate_design(design: StimulusDesign) -> list[str]:
     warnings: list[str] = []
     if not design.noises:
@@ -204,14 +317,23 @@ def validate_design(design: StimulusDesign) -> list[str]:
     t = design.trajectory
     if t.path_direction not in SUPPORTED_DIRECTIONS:
         warnings.append(f"Unsupported path direction: {t.path_direction}")
-    if t.start_radius_m <= 0 or t.end_radius_m <= 0:
+    if t.coordinate_mode not in SUPPORTED_COORDINATE_MODES:
+        warnings.append(f"Unsupported coordinate mode: {t.coordinate_mode}")
+    if _uses_cartesian_coordinates(t):
+        start = (t.start_x_m, t.start_y_m, t.start_z_m)
+        end = (t.end_x_m, t.end_y_m, t.end_z_m)
+        if any(value is None for value in (*start, *end)):
+            warnings.append("Cartesian trajectories require start and end X/Y/Z coordinates.")
+        elif math.dist(start, end) <= 0:
+            warnings.append("Start and end coordinates must not be identical.")
+    if not _uses_cartesian_coordinates(t) and (t.start_radius_m <= 0 or t.end_radius_m <= 0):
         warnings.append("Start and end radius must be positive.")
     if t.path_length_m <= 0:
         warnings.append("Path length must be positive.")
     if t.propagation_speed_mps <= 0:
         warnings.append("Propagation speed must be positive.")
     radial_delta = abs(t.start_radius_m - t.end_radius_m)
-    if t.path_direction in {"approach", "recede"} and abs(t.path_length_m - radial_delta) > 0.05:
+    if not _uses_cartesian_coordinates(t) and t.path_direction in {"approach", "recede"} and abs(t.path_length_m - radial_delta) > 0.05:
         warnings.append("Radial path length differs from the start/end radius difference.")
 
     p = design.protocol
@@ -595,29 +717,107 @@ def _default_azimuths_for_direction(spec: TrajectorySpec) -> tuple[float, float]
     return spec.azimuth_start_deg, spec.azimuth_end_deg
 
 
+def _trajectory_xyz_at_fraction(spec: TrajectorySpec, u: float) -> dict[str, float]:
+    u = max(0.0, min(1.0, u))
+    if _uses_cartesian_coordinates(spec):
+        start, end = trajectory_endpoints_xyz(spec)
+        return {
+            "x_m": start["x_m"] + (end["x_m"] - start["x_m"]) * u,
+            "y_m": start["y_m"] + (end["y_m"] - start["y_m"]) * u,
+            "z_m": start["z_m"] + (end["z_m"] - start["z_m"]) * u,
+        }
+
+    az0, az1 = _default_azimuths_for_direction(spec)
+    radius_m = spec.start_radius_m + (spec.end_radius_m - spec.start_radius_m) * u
+    azimuth_deg = az0 + (az1 - az0) * u
+    return spherical_to_cartesian(radius_m, azimuth_deg, spec.elevation_deg)
+
+
+def trajectory_point_at_time(spec: TrajectorySpec, time_s: float) -> dict[str, float]:
+    movement_duration = max(spec.movement_duration_s, 0.0)
+    start_hold_s = max(spec.padding_pre_s, 0.0)
+    end_hold_s = max(spec.padding_post_s, 0.0)
+    total_duration = start_hold_s + movement_duration + end_hold_s
+    clamped_time = max(0.0, min(time_s, total_duration))
+    if clamped_time < start_hold_s or movement_duration <= 0:
+        phase = "start_hold"
+        u = 0.0
+    elif clamped_time <= start_hold_s + movement_duration:
+        phase = "movement"
+        u = (clamped_time - start_hold_s) / movement_duration
+    else:
+        phase = "end_hold"
+        u = 1.0
+
+    xyz = _trajectory_xyz_at_fraction(spec, u)
+    spherical = cartesian_to_spherical(xyz["x_m"], xyz["y_m"], xyz["z_m"])
+    return {
+        "time_s": clamped_time,
+        "phase": phase,
+        "u": u,
+        "radius_m": spherical["radius_m"],
+        "azimuth_deg": spherical["azimuth_deg"],
+        "elevation_deg": spherical["elevation_deg"],
+        "x_m": xyz["x_m"],
+        "y_m": xyz["y_m"],
+        "z_m": xyz["z_m"],
+    }
+
+
+def trajectory_points_with_holds(spec: TrajectorySpec, samples_per_second: float = 100.0) -> list[dict[str, float]]:
+    if samples_per_second <= 0:
+        raise ValueError("samples_per_second must be positive.")
+    total_duration = max(spec.total_duration_s, 0.0)
+    sample_count = max(2, int(round(total_duration * samples_per_second)) + 1)
+    if sample_count == 2:
+        return [trajectory_point_at_time(spec, 0.0), trajectory_point_at_time(spec, total_duration)]
+    return [
+        trajectory_point_at_time(spec, total_duration * i / (sample_count - 1))
+        for i in range(sample_count)
+    ]
+
+
 def trajectory_points(spec: TrajectorySpec, samples: int = 121) -> list[dict[str, float]]:
     samples = max(2, samples)
     duration = max(spec.movement_duration_s, 0.0)
-    az0, az1 = _default_azimuths_for_direction(spec)
+    if _uses_cartesian_coordinates(spec):
+        rows: list[dict[str, float]] = []
+        for i in range(samples):
+            u = i / (samples - 1)
+            time_s = duration * u
+            xyz = _trajectory_xyz_at_fraction(spec, u)
+            x_m = xyz["x_m"]
+            y_m = xyz["y_m"]
+            z_m = xyz["z_m"]
+            spherical = cartesian_to_spherical(x_m, y_m, z_m)
+            rows.append(
+                {
+                    "time_s": time_s,
+                    "radius_m": spherical["radius_m"],
+                    "azimuth_deg": spherical["azimuth_deg"],
+                    "elevation_deg": spherical["elevation_deg"],
+                    "x_m": x_m,
+                    "y_m": y_m,
+                    "z_m": z_m,
+                }
+            )
+        return rows
+
     rows: list[dict[str, float]] = []
     for i in range(samples):
         u = i / (samples - 1)
         time_s = duration * u
-        radius_m = spec.start_radius_m + (spec.end_radius_m - spec.start_radius_m) * u
-        azimuth_deg = az0 + (az1 - az0) * u
-        elevation_deg = spec.elevation_deg
-        az = math.radians(azimuth_deg)
-        el = math.radians(elevation_deg)
-        horizontal_radius = radius_m * math.cos(el)
+        xyz = _trajectory_xyz_at_fraction(spec, u)
+        spherical = cartesian_to_spherical(xyz["x_m"], xyz["y_m"], xyz["z_m"])
         rows.append(
             {
                 "time_s": time_s,
-                "radius_m": radius_m,
-                "azimuth_deg": azimuth_deg,
-                "elevation_deg": elevation_deg,
-                "x_m": horizontal_radius * math.sin(az),
-                "y_m": horizontal_radius * math.cos(az),
-                "z_m": radius_m * math.sin(el),
+                "radius_m": spherical["radius_m"],
+                "azimuth_deg": spherical["azimuth_deg"],
+                "elevation_deg": spherical["elevation_deg"],
+                "x_m": xyz["x_m"],
+                "y_m": xyz["y_m"],
+                "z_m": xyz["z_m"],
             }
         )
     return rows

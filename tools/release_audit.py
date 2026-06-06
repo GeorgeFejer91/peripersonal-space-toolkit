@@ -87,6 +87,7 @@ def _is_under(rel_path: Path, parent: Path) -> bool:
 def check_required_files() -> list[str]:
     required = [
         "README.md",
+        "AGENTS.md",
         "LICENSE",
         "CITATION.cff",
         "pyproject.toml",
@@ -105,6 +106,10 @@ def check_required_files() -> list[str]:
         "docs/PARADIGM_LIBRARY.md",
         "docs/PPS_METADATA_REPRODUCIBILITY_AUDIT.md",
         "docs/PRIVACY_RELEASE.md",
+        "For-AI/README.md",
+        "For-AI/project_context.md",
+        "For-AI/evolving_goals.md",
+        "For-AI/agent_update_protocol.md",
         "assets/breathing/spoken_assets_manifest.json",
         "assets/click/mouse_click_tone_1200Hz_50ms.wav",
         "assets/master_blocks/Master_Block_1.csv",

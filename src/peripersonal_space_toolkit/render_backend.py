@@ -1,0 +1,921 @@
+"""3DTI-compatible design-rendering adapter.
+
+The native 3DTI wrapper remains the renderer-of-record target. Until that
+wrapper is packaged, the default `auto` path renders auditable WAVs with the
+bundled Python SOFA/FABIAN reference engine from the same saved trajectory/SOA
+configuration.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .design import (
+    DEFAULT_SOFA_FILE,
+    StimulusDesign,
+    cartesian_to_spherical,
+    design_from_dict,
+    design_to_dict,
+    protocol_factor_pairs,
+    protocol_summary,
+    trajectory_point_at_time,
+    trajectory_points_with_holds,
+)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+THIRD_PARTY_3DTI_DIR = REPO_ROOT / "third_party" / "3dti_AudioToolkit"
+THREEDTI_REPOSITORY = "https://github.com/3DTune-In/3dti_AudioToolkit"
+THREEDTI_COMMIT = "6bfee08705675308a8c348b4c3a4d582586d2f99"
+THREEDTI_ARCHIVE_SHA256 = "a96038866bf9d86420c6f871e611b1888add245d2cc3307341fedcb41cef6b82"
+DEFAULT_BACKEND_EXE = REPO_ROOT / "third_party" / "3dti_renderer" / "bin" / "pps-3dti-renderer.exe"
+DEFAULT_RENDER_SAMPLE_RATE = 44100
+DEFAULT_RENDER_FRAME_MS = 20.0
+DEFAULT_RENDER_HOP_MS = 5.0
+DEFAULT_HEAD_DIAMETER_M = 0.18
+DEFAULT_SOUND_SPEED_MPS = 343.0
+THREEDTI_NEAR_FIELD_REFERENCE_DISTANCE_M = 1.95
+THREEDTI_ANECHOIC_ATTENUATION_DB_PER_DISTANCE_DOUBLING = -6.0206
+OUTPUT_AUDIO_PEAK_NORMALIZATION = 0.90
+OUTPUT_LIMITER_PEAK = 0.99
+RENDER_ENGINES = ("auto", "native-3dti", "python-sofa-reference")
+STANDARD_HRTF_RESOURCE = {
+    "id": "fabian_tu_berlin_hato_0",
+    "label": "FABIAN neutral HRIR, HATO 0",
+    "role": "fixed_standard_listener_hrir",
+    "experimenter_visible": False,
+    "license": "CC BY 4.0",
+    "source_record": "TU Berlin / DepositOnce FABIAN neutral HRIR",
+    "sofa_mirror": "https://sofacoustics.org/data/database/tu-berlin/FABIAN_HRIR_measured_HATO_0.sofa",
+}
+
+
+@dataclass
+class RenderResult:
+    status: str
+    exit_code: int
+    output_dir: Path
+    config_path: Path
+    manifest_path: Path
+    qc_path: Path
+    backend_executable: Path | None = None
+    wav_paths: tuple[Path, ...] = ()
+    tactile_events_path: Path | None = None
+
+
+class RendererUnavailable(RuntimeError):
+    pass
+
+
+def sha256_file(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def repo_relative_path(path: str | Path) -> Path:
+    resolved = Path(path).expanduser()
+    if resolved.is_absolute():
+        return resolved
+    return REPO_ROOT / resolved
+
+
+def resolve_backend_executable(path: Path | None = None) -> Path:
+    if path is not None:
+        return path
+    env_path = os.environ.get("PPS_3DTI_RENDERER")
+    if env_path:
+        return Path(env_path)
+    return DEFAULT_BACKEND_EXE
+
+
+def app_to_3dti_coordinates(x_m: float, y_m: float, z_m: float) -> dict[str, float]:
+    """Map PPS app coordinates into 3DTI's default Ambisonic axis convention."""
+    return {
+        "x_m": y_m,
+        "y_m": -x_m,
+        "z_m": z_m,
+    }
+
+
+def load_render_design(path: Path) -> StimulusDesign:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if "template_id" in data and "design" in data:
+        from .templates import template_from_dict
+
+        return template_from_dict(data).design
+    return design_from_dict(data)
+
+
+def _noise_rows(design: StimulusDesign) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": noise.label,
+            "noise_type": noise.noise_type,
+            "gain": noise.gain,
+        }
+        for noise in design.noises
+    ]
+
+
+def _listener_head_diameter_m(design: StimulusDesign) -> float:
+    value = design.study_profile_reference_parameters.get("head_diameter_m", DEFAULT_HEAD_DIAMETER_M)
+    try:
+        head_diameter = float(value)
+    except (TypeError, ValueError):
+        head_diameter = DEFAULT_HEAD_DIAMETER_M
+    return head_diameter if head_diameter > 0 else DEFAULT_HEAD_DIAMETER_M
+
+
+def _head_model_source(design: StimulusDesign) -> str:
+    if "head_diameter_m" in design.study_profile_reference_parameters:
+        profile = design.study_profile_id or design.study_profile_title or "study_profile"
+        return f"{profile}.reference_parameters.head_diameter_m"
+    return "toolkit_default_head_diameter_m"
+
+
+def _tactile_events(design: StimulusDesign) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for soa_ms, spatial_cm in protocol_factor_pairs(design.protocol):
+        source_at_tactile = trajectory_point_at_time(design.trajectory, soa_ms / 1000.0)
+        events.append(
+            {
+                "trial_type": "Audio-Tactile",
+                "soa_ms": soa_ms,
+                "tactile_onset_s": soa_ms / 1000.0,
+                "planned_spatial_value_cm": spatial_cm,
+                "source_radius_at_tactile_cm": source_at_tactile["radius_m"] * 100.0,
+                "source_x_at_tactile_m": source_at_tactile["x_m"],
+                "source_y_at_tactile_m": source_at_tactile["y_m"],
+                "source_z_at_tactile_m": source_at_tactile["z_m"],
+                "trajectory_phase_at_tactile": source_at_tactile["phase"],
+            }
+        )
+    return events
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()).strip("_")
+    return slug or "stimulus"
+
+
+def _expected_wav_paths(config: dict[str, Any], output_dir: Path) -> list[Path]:
+    return [output_dir / f"looming_{_slug(noise['label'])}.wav" for noise in config["source"]["noises"]]
+
+
+def _generate_noise(noise_type: str, samples: int, sample_rate: int, seed: int) -> "Any":
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    white = rng.standard_normal(samples)
+    noise = noise_type.lower()
+    if noise == "white":
+        result = white
+    elif noise == "pink":
+        spectrum = np.fft.rfft(white)
+        freqs = np.fft.rfftfreq(samples, 1.0 / sample_rate)
+        freqs[0] = freqs[1] if len(freqs) > 1 else 1.0
+        result = np.fft.irfft(spectrum / np.sqrt(freqs), n=samples)
+    elif noise == "blue":
+        spectrum = np.fft.rfft(white)
+        freqs = np.fft.rfftfreq(samples, 1.0 / sample_rate)
+        freqs[0] = freqs[1] if len(freqs) > 1 else 1.0
+        result = np.fft.irfft(spectrum * np.sqrt(freqs), n=samples)
+    elif noise == "brown":
+        result = np.cumsum(white)
+    else:
+        raise ValueError(f"Unsupported noise type: {noise_type}")
+    peak = float(np.max(np.abs(result))) if samples else 0.0
+    return result / peak if peak > 0 else result
+
+
+def _load_sofa_hrirs(sofa_file: str) -> dict[str, Any]:
+    import numpy as np
+
+    path = repo_relative_path(sofa_file)
+    try:
+        from netCDF4 import Dataset
+
+        with Dataset(path, "r") as sofa:
+            positions = np.asarray(sofa.variables["SourcePosition"][:], dtype=float)
+            hrirs = np.asarray(sofa.variables["Data.IR"][:], dtype=float)
+            sample_rate = int(round(float(np.asarray(sofa.variables["Data.SamplingRate"][:]).ravel()[0])))
+    except Exception:
+        import sofar
+
+        sofa = sofar.read_sofa(str(path))
+        positions = np.asarray(sofa.SourcePosition, dtype=float)
+        hrirs = np.asarray(sofa.Data_IR, dtype=float)
+        sample_rate = int(round(float(sofa.Data_SamplingRate)))
+    if positions.shape[0] == 3 and positions.ndim == 2:
+        positions = positions.T
+    return {
+        "positions": positions,
+        "hrirs": hrirs,
+        "sample_rate": sample_rate,
+    }
+
+
+def _nearest_hrir_index(positions: "Any", app_azimuth_deg: float, elevation_deg: float) -> int:
+    import numpy as np
+
+    sofa_azimuth = (-app_azimuth_deg) % 360.0
+    azimuth_delta = ((positions[:, 0] - sofa_azimuth + 180.0) % 360.0) - 180.0
+    elevation_delta = positions[:, 1] - elevation_deg
+    distance = azimuth_delta**2 + elevation_delta**2
+    return int(np.argmin(distance))
+
+
+def _sample_from_config(config: dict[str, Any], time_s: float) -> dict[str, float]:
+    samples = config["trajectory"]["samples"]
+    if not samples:
+        return {"x_m": 0.0, "y_m": 1.0, "z_m": 0.0, "radius_m": 1.0}
+    target = min(samples, key=lambda item: abs(float(item["time_s"]) - time_s))
+    return {
+        "x_m": float(target["x_m"]),
+        "y_m": float(target["y_m"]),
+        "z_m": float(target["z_m"]),
+        "radius_m": float(target["radius_m"]),
+    }
+
+
+def _tactile_waveform(config: dict[str, Any], sample_rate: int) -> "Any":
+    import numpy as np
+
+    spec = config["tactile"]["waveform"]
+    duration_s = float(spec["duration_s"])
+    samples = max(1, int(round(duration_s * sample_rate)))
+    t = np.arange(samples, dtype=float) / sample_rate
+    attack_samples = max(1, min(samples, int(round(0.02 * sample_rate))))
+    waveform = np.empty(samples, dtype=float)
+    waveform[:attack_samples] = np.sin(2 * np.pi * float(spec["attack_frequency_hz"]) * t[:attack_samples])
+    waveform[attack_samples:] = np.sin(2 * np.pi * float(spec["decay_frequency_hz"]) * t[attack_samples:])
+    envelope = np.hanning(max(4, samples * 2))[:samples]
+    if len(envelope) != samples:
+        envelope = np.ones(samples, dtype=float)
+    waveform *= envelope
+    peak = float(np.max(np.abs(waveform)))
+    if peak > 0:
+        waveform = waveform / peak * float(spec.get("peak_normalization", 0.95))
+    return waveform
+
+
+def _add_tactile_channel(config: dict[str, Any], sample_rate: int, samples: int) -> "Any":
+    import numpy as np
+
+    channel = np.zeros(samples, dtype=float)
+    cue = _tactile_waveform(config, sample_rate)
+    for event in config["tactile"]["events"]:
+        onset = int(round(float(event["tactile_onset_s"]) * sample_rate))
+        if onset >= samples:
+            continue
+        end = min(samples, onset + len(cue))
+        if end > onset:
+            channel[onset:end] += cue[: end - onset]
+    peak = float(np.max(np.abs(channel))) if samples else 0.0
+    if peak > 1.0:
+        channel /= peak
+    return channel
+
+
+def build_render_config(
+    design: StimulusDesign,
+    *,
+    seed: int,
+    output_dir: Path,
+    samples_per_second: float = 200.0,
+    sample_rate: int = DEFAULT_RENDER_SAMPLE_RATE,
+) -> dict[str, Any]:
+    trajectory_samples = trajectory_points_with_holds(design.trajectory, samples_per_second=samples_per_second)
+    sofa_file = design.sofa_file or DEFAULT_SOFA_FILE
+    sofa_path = repo_relative_path(sofa_file)
+    head_diameter_m = _listener_head_diameter_m(design)
+    head_radius_m = head_diameter_m / 2.0
+    return {
+        "schema": "pps-3dti-render-config.v1",
+        "renderer": {
+            "backend": "3DTI AudioToolkit",
+            "repository": THREEDTI_REPOSITORY,
+            "commit": THREEDTI_COMMIT,
+            "source_snapshot_path": str(THIRD_PARTY_3DTI_DIR.as_posix()),
+            "source_archive_sha256": THREEDTI_ARCHIVE_SHA256,
+            "frame_ms": DEFAULT_RENDER_FRAME_MS,
+            "hop_ms": DEFAULT_RENDER_HOP_MS,
+            "spatialization_mode": "HighQuality",
+            "acoustic_model": {
+                "hrir_lookup": "SOFA/FABIAN direction lookup on the measured HRTF sphere",
+                "distance_model": "3DTI direct-path distance attenuation plus near-field ILD/shadow filtering",
+                "customized_itd": True,
+                "propagation_delay": True,
+                "sound_speed_mps": DEFAULT_SOUND_SPEED_MPS,
+                "near_field_reference_distance_m": THREEDTI_NEAR_FIELD_REFERENCE_DISTANCE_M,
+                "anechoic_attenuation_db_per_distance_doubling": (
+                    THREEDTI_ANECHOIC_ATTENUATION_DB_PER_DISTANCE_DOUBLING
+                ),
+                "distance_attenuation_smoothing": True,
+                "reverb_enabled": False,
+            },
+            "level_model": {
+                "noise_gain_unit": "linear_amplitude_multiplier",
+                "noise_gain_default": 1.0,
+                "absolute_spl_calibrated": False,
+                "output_audio_peak_normalization": OUTPUT_AUDIO_PEAK_NORMALIZATION,
+                "output_audio_peak_normalization_dbfs": 20.0 * math.log10(OUTPUT_AUDIO_PEAK_NORMALIZATION),
+                "output_limiter_peak": OUTPUT_LIMITER_PEAK,
+                "output_limiter_peak_dbfs": 20.0 * math.log10(OUTPUT_LIMITER_PEAK),
+                "note": (
+                    "Pfeiffer's reference script uses dB parameters before final WAV normalization; "
+                    "this renderer keeps 3DTI relative distance/ILD gains and peak-normalizes the generated WAV."
+                ),
+            },
+        },
+        "coordinate_convention": {
+            "app": "X right positive, Y front positive, Z up positive",
+            "3dti_default": "X front positive, Y left positive, Z up positive",
+            "adapter_mapping": {
+                "3dti_x_m": "app_y_m",
+                "3dti_y_m": "-app_x_m",
+                "3dti_z_m": "app_z_m",
+            },
+            "adapter_responsibility": "Map app coordinates into 3DTI source/listener coordinates before calling SetSourceTransform.",
+        },
+        "listener": {
+            "stationary": True,
+            "x_m": 0.0,
+            "y_m": 0.0,
+            "z_m": 0.0,
+            "head_diameter_m": head_diameter_m,
+            "head_radius_m": head_radius_m,
+            "head_model_source": _head_model_source(design),
+        },
+        "source": {
+            "type": "generated_noise",
+            "seed": seed,
+            "sample_rate": sample_rate,
+            "noises": _noise_rows(design),
+            "gain_law": "3DTI_free_field_direct_path",
+            "sofa_file": sofa_file,
+            "sofa_file_sha256": sha256_file(sofa_path),
+            "hrtf_resource": {
+                **STANDARD_HRTF_RESOURCE,
+                "sofa_file": sofa_file,
+                "sofa_file_sha256": sha256_file(sofa_path),
+            },
+        },
+        "study_profile": {
+            "id": design.study_profile_id,
+            "title": design.study_profile_title,
+            "notes": design.study_profile_notes,
+            "reference_parameters": design.study_profile_reference_parameters,
+        },
+        "tactile": {
+            "soa_reference": "stimulus_window_onset_s",
+            "output_layout": "multichannel_binaural_plus_tactile",
+            "channels": {
+                "0": "binaural_left",
+                "1": "binaural_right",
+                "2": "vibrotactile",
+            },
+            "legacy_two_channel_layout": {
+                "supported_for_study5_replication_only": True,
+                "channels": {
+                    "0": "vibrotactile",
+                    "1": "mono_or_single_ear_looming",
+                },
+            },
+            "waveform": {
+                "type": "two_component_vibrotactile_sinusoid",
+                "duration_s": 0.1,
+                "attack_frequency_hz": 200,
+                "decay_frequency_hz": 50,
+                "attack_db": 4,
+                "decay_db": -22,
+                "peak_normalization": 0.95,
+            },
+            "events": _tactile_events(design),
+        },
+        "protocol": {
+            "summary": protocol_summary(design),
+            "soa_values_ms": design.protocol.soa_values_ms,
+            "spatial_values_cm": design.protocol.spatial_values_cm,
+            "pair_spatial_values_with_soas": design.protocol.pair_spatial_values_with_soas,
+            "tactile_sites": design.protocol.tactile_sites,
+            "respiratory_phases": design.protocol.respiratory_phases,
+            "trial_randomization_strategy": design.protocol.trial_randomization_strategy,
+            "block_order_randomization": design.protocol.block_order_randomization,
+            "random_seed": design.protocol.random_seed,
+        },
+        "trajectory": {
+            "mode": "linear_cartesian_with_endpoint_holds",
+            "start_hold_s": design.trajectory.padding_pre_s,
+            "movement_duration_s": design.trajectory.movement_duration_s,
+            "end_hold_s": design.trajectory.padding_post_s,
+            "total_duration_s": design.trajectory.total_duration_s,
+            "samples_per_second": samples_per_second,
+            "samples": trajectory_samples,
+        },
+        "outputs": {
+            "output_dir": str(output_dir),
+            "expected_wav_pattern": "looming_{noise_label}.wav",
+            "manifest": "render_manifest.json",
+            "qc_csv": "render_qc.csv",
+            "tactile_events_csv": "render_tactile_events.csv",
+        },
+        "design": design_to_dict(design),
+    }
+
+
+def write_render_qc(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "status",
+        "noise_label",
+        "noise_type",
+        "duration_s",
+        "sample_rate",
+        "channels",
+        "tactile_events",
+        "tactile_channel",
+        "peak_dbfs",
+        "clipping",
+        "hrir_positions_used",
+        "first_half_left_rms",
+        "first_half_right_rms",
+        "second_half_left_rms",
+        "second_half_right_rms",
+        "wav_sha256",
+        "message",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_tactile_events_qc(path: Path, config: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sample_rate = int(config["source"]["sample_rate"])
+    waveform = config["tactile"]["waveform"]
+    cue_duration_s = float(waveform["duration_s"])
+    cue_samples = int(round(cue_duration_s * sample_rate))
+    fieldnames = [
+        "trial_type",
+        "soa_ms",
+        "tactile_onset_s",
+        "tactile_onset_sample",
+        "tactile_duration_s",
+        "tactile_duration_samples",
+        "tactile_channel",
+        "planned_spatial_value_cm",
+        "source_radius_at_tactile_cm",
+        "source_x_at_tactile_m",
+        "source_y_at_tactile_m",
+        "source_z_at_tactile_m",
+        "trajectory_phase_at_tactile",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for event in config["tactile"]["events"]:
+            writer.writerow(
+                {
+                    "trial_type": event["trial_type"],
+                    "soa_ms": event["soa_ms"],
+                    "tactile_onset_s": f"{float(event['tactile_onset_s']):.6f}",
+                    "tactile_onset_sample": int(round(float(event["tactile_onset_s"]) * sample_rate)),
+                    "tactile_duration_s": f"{cue_duration_s:.6f}",
+                    "tactile_duration_samples": cue_samples,
+                    "tactile_channel": "2",
+                    "planned_spatial_value_cm": event["planned_spatial_value_cm"],
+                    "source_radius_at_tactile_cm": f"{float(event['source_radius_at_tactile_cm']):.6f}",
+                    "source_x_at_tactile_m": f"{float(event['source_x_at_tactile_m']):.9f}",
+                    "source_y_at_tactile_m": f"{float(event['source_y_at_tactile_m']):.9f}",
+                    "source_z_at_tactile_m": f"{float(event['source_z_at_tactile_m']):.9f}",
+                    "trajectory_phase_at_tactile": event["trajectory_phase_at_tactile"],
+                }
+            )
+
+
+def write_trajectory_qc(path: Path, config: dict[str, Any]) -> None:
+    samples = config["trajectory"]["samples"]
+    if not samples:
+        return
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(samples[0]))
+        writer.writeheader()
+        writer.writerows(samples)
+
+
+def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, qc_path: Path) -> list[Path]:
+    import numpy as np
+    import soundfile as sf
+    from scipy import signal
+
+    sofa = _load_sofa_hrirs(config["source"]["sofa_file"])
+    sample_rate = int(config["source"]["sample_rate"])
+    if sofa["sample_rate"] != sample_rate:
+        raise RuntimeError(
+            f"SOFA sample rate {sofa['sample_rate']} Hz does not match render sample rate {sample_rate} Hz."
+        )
+    total_duration = float(config["trajectory"]["total_duration_s"])
+    total_samples = max(1, int(round(total_duration * sample_rate)))
+    frame_samples = max(16, int(round(float(config["renderer"]["frame_ms"]) / 1000.0 * sample_rate)))
+    hop_samples = max(1, int(round(float(config["renderer"]["hop_ms"]) / 1000.0 * sample_rate)))
+    hrir_len = int(sofa["hrirs"].shape[-1])
+    window = np.sqrt(np.hanning(frame_samples))
+    if not np.any(window):
+        window = np.ones(frame_samples, dtype=float)
+    tactile = _add_tactile_channel(config, sample_rate, total_samples)
+    rows: list[dict[str, Any]] = []
+    wav_paths: list[Path] = []
+
+    for noise_index, noise in enumerate(config["source"]["noises"]):
+        dry_seed = int(config["source"]["seed"]) + noise_index * 1009
+        dry = _generate_noise(noise["noise_type"], total_samples, sample_rate, dry_seed)
+        stereo = np.zeros((total_samples + hrir_len + frame_samples, 2), dtype=float)
+        used_hrir_indices: set[int] = set()
+
+        for start in range(0, total_samples, hop_samples):
+            stop = min(total_samples, start + frame_samples)
+            valid = stop - start
+            if valid <= 0:
+                continue
+            frame = np.zeros(frame_samples, dtype=float)
+            frame[:valid] = dry[start:stop]
+            center_time = (start + valid / 2.0) / sample_rate
+            point = _sample_from_config(config, center_time)
+            spherical = cartesian_to_spherical(point["x_m"], point["y_m"], point["z_m"])
+            hrir_index = _nearest_hrir_index(
+                sofa["positions"],
+                spherical["azimuth_deg"],
+                spherical["elevation_deg"],
+            )
+            used_hrir_indices.add(hrir_index)
+            radius = max(float(point["radius_m"]), 0.05)
+            distance_gain = 1.0 / radius if config["source"].get("gain_law") else 1.0
+            frame *= window * float(noise.get("gain", 1.0)) * distance_gain
+            left = signal.fftconvolve(frame, sofa["hrirs"][hrir_index, 0, :], mode="full")
+            right = signal.fftconvolve(frame, sofa["hrirs"][hrir_index, 1, :], mode="full")
+            end = start + len(left)
+            stereo[start:end, 0] += left
+            stereo[start:end, 1] += right
+
+        stereo = stereo[:total_samples, :]
+        audio_peak = float(np.max(np.abs(stereo))) if stereo.size else 0.0
+        if audio_peak > 0:
+            stereo = stereo / audio_peak * OUTPUT_AUDIO_PEAK_NORMALIZATION
+        rendered = np.column_stack([stereo, tactile])
+        first_half = stereo[: total_samples // 2, :]
+        second_half = stereo[total_samples // 2 :, :]
+        first_rms = np.sqrt(np.mean(first_half * first_half, axis=0)) if len(first_half) else np.zeros(2)
+        second_rms = np.sqrt(np.mean(second_half * second_half, axis=0)) if len(second_half) else np.zeros(2)
+        peak = float(np.max(np.abs(rendered))) if rendered.size else 0.0
+        if peak > OUTPUT_LIMITER_PEAK:
+            rendered = rendered / peak * OUTPUT_LIMITER_PEAK
+            peak = float(np.max(np.abs(rendered)))
+        wav_path = output_dir / f"looming_{_slug(noise['label'])}.wav"
+        sf.write(wav_path, rendered, sample_rate, subtype="PCM_16")
+        wav_paths.append(wav_path)
+        peak_dbfs = "-inf" if peak <= 0 else f"{20.0 * math.log10(peak):.3f}"
+        rows.append(
+            {
+                "status": "rendered_reference",
+                "noise_label": noise["label"],
+                "noise_type": noise["noise_type"],
+                "duration_s": f"{total_samples / sample_rate:.6f}",
+                "sample_rate": sample_rate,
+                "channels": 3,
+                "tactile_events": len(config["tactile"]["events"]),
+                "tactile_channel": 2,
+                "peak_dbfs": peak_dbfs,
+                "clipping": str(peak >= 1.0).lower(),
+                "hrir_positions_used": len(used_hrir_indices),
+                "first_half_left_rms": f"{float(first_rms[0]):.9f}",
+                "first_half_right_rms": f"{float(first_rms[1]):.9f}",
+                "second_half_left_rms": f"{float(second_rms[0]):.9f}",
+                "second_half_right_rms": f"{float(second_rms[1]):.9f}",
+                "wav_sha256": sha256_file(wav_path) or "",
+                "message": (
+                    "Rendered with the Python SOFA/FABIAN reference engine from the same "
+                    f"3DTI-compatible config; HRIR positions used: {len(used_hrir_indices)}."
+                ),
+            }
+        )
+
+    write_render_qc(qc_path, rows)
+    return wav_paths
+
+
+def write_manifest(
+    path: Path,
+    *,
+    status: str,
+    config: dict[str, Any],
+    backend_executable: Path,
+    message: str,
+    render_engine: str = "native-3dti",
+    wav_paths: list[Path] | tuple[Path, ...] | None = None,
+    tactile_events_path: Path | None = None,
+) -> None:
+    manifest = {
+        "schema": "pps-3dti-render-manifest.v1",
+        "status": status,
+        "message": message,
+        "backend_executable": str(backend_executable),
+        "backend_executable_sha256": sha256_file(backend_executable),
+        "render_engine": render_engine,
+        "renderer": config["renderer"],
+        "listener": config["listener"],
+        "coordinate_convention": config["coordinate_convention"],
+        "duration_s": config["trajectory"]["total_duration_s"],
+        "trajectory_samples": len(config["trajectory"]["samples"]),
+        "tactile_events": {
+            "count": len(config["tactile"]["events"]),
+            "path": str(tactile_events_path) if tactile_events_path else None,
+            "sha256": sha256_file(tactile_events_path) if tactile_events_path else None,
+        },
+        "source_snapshot_present": THIRD_PARTY_3DTI_DIR.exists(),
+        "sofa_file": config["source"]["sofa_file"],
+        "sofa_file_sha256": config["source"]["sofa_file_sha256"],
+        "hrtf_resource": config["source"]["hrtf_resource"],
+        "study_profile": config.get("study_profile", {}),
+        "wav_outputs": [
+            {
+                "path": str(path),
+                "sha256": sha256_file(path),
+            }
+            for path in (wav_paths or [])
+        ],
+    }
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def postprocess_native_manifest(
+    path: Path,
+    *,
+    config: dict[str, Any],
+    backend_executable: Path,
+    wav_paths: list[Path],
+    tactile_events_path: Path,
+) -> None:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except json.JSONDecodeError:
+        manifest = {}
+    manifest.update(
+        {
+            "schema": "pps-render-manifest.v1",
+            "status": "rendered_3dti",
+            "render_engine": "native-3dti",
+            "backend_executable": str(backend_executable),
+            "backend_executable_sha256": sha256_file(backend_executable),
+            "renderer": config["renderer"],
+            "source": {
+                "sample_rate": config["source"]["sample_rate"],
+                "sofa_file": config["source"]["sofa_file"],
+                "sofa_file_sha256": config["source"]["sofa_file_sha256"],
+                "hrtf_resource": config["source"].get("hrtf_resource", {}),
+            },
+            "listener": config["listener"],
+            "study_profile": config.get("study_profile", {}),
+            "tactile_events": {
+                "path": str(tactile_events_path),
+                "sha256": sha256_file(tactile_events_path),
+                "count": len(config["tactile"]["events"]),
+            },
+            "wav_outputs": [
+                {
+                    "path": str(path),
+                    "sha256": sha256_file(path),
+                }
+                for path in wav_paths
+            ],
+        }
+    )
+    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def render_design_with_3dti(
+    design_path: Path,
+    output_dir: Path,
+    *,
+    seed: int,
+    backend_executable: Path | None = None,
+    dry_run: bool = False,
+    engine: str = "auto",
+) -> RenderResult:
+    if engine not in RENDER_ENGINES:
+        raise ValueError(f"Unsupported render engine: {engine}")
+    design = load_render_design(design_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    backend = resolve_backend_executable(backend_executable)
+    config = build_render_config(design, seed=seed, output_dir=output_dir)
+    config_path = output_dir / "render_config.3dti.json"
+    manifest_path = output_dir / "render_manifest.json"
+    qc_path = output_dir / "render_qc.csv"
+    trajectory_path = output_dir / "render_trajectory_samples.csv"
+    tactile_events_path = output_dir / "render_tactile_events.csv"
+
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    write_trajectory_qc(trajectory_path, config)
+    write_tactile_events_qc(tactile_events_path, config)
+
+    if dry_run:
+        write_manifest(
+            manifest_path,
+            status="config_written",
+            config=config,
+            backend_executable=backend,
+            message="Render config written; backend was not invoked.",
+            render_engine=engine,
+            tactile_events_path=tactile_events_path,
+        )
+        write_render_qc(qc_path, [])
+        return RenderResult(
+            "config_written",
+            0,
+            output_dir,
+            config_path,
+            manifest_path,
+            qc_path,
+            backend,
+            tactile_events_path=tactile_events_path,
+        )
+
+    if not backend.exists():
+        if engine in {"auto", "python-sofa-reference"}:
+            wav_paths = render_with_python_sofa_reference(config, output_dir, qc_path)
+            message = (
+                "Native 3DTI renderer backend was not found, so WAVs were rendered with the "
+                "Python SOFA/FABIAN reference engine from the same saved trajectory/SOA config."
+            )
+            write_manifest(
+                manifest_path,
+                status="rendered_reference",
+                config=config,
+                backend_executable=backend,
+                message=message,
+                render_engine="python-sofa-reference",
+                wav_paths=wav_paths,
+                tactile_events_path=tactile_events_path,
+            )
+            return RenderResult(
+                "rendered_reference",
+                0,
+                output_dir,
+                config_path,
+                manifest_path,
+                qc_path,
+                backend,
+                tuple(wav_paths),
+                tactile_events_path,
+            )
+        message = (
+            "3DTI renderer backend is not built. Run windows/Fetch_3DTI_Backend.ps1 "
+            "and windows/Build_3DTI_Renderer.ps1, or set PPS_3DTI_RENDERER."
+        )
+        write_manifest(
+            manifest_path,
+            status="backend_missing",
+            config=config,
+            backend_executable=backend,
+            message=message,
+            render_engine="native-3dti",
+            tactile_events_path=tactile_events_path,
+        )
+        write_render_qc(
+            qc_path,
+            [
+                {
+                    "status": "backend_missing",
+                    "noise_label": noise["label"],
+                    "noise_type": noise["noise_type"],
+                    "duration_s": config["trajectory"]["total_duration_s"],
+                    "sample_rate": config["source"]["sample_rate"],
+                    "peak_dbfs": "",
+                    "clipping": "",
+                    "wav_sha256": "",
+                    "message": message,
+                }
+                for noise in config["source"]["noises"]
+            ],
+        )
+        return RenderResult(
+            "backend_missing",
+            2,
+            output_dir,
+            config_path,
+            manifest_path,
+            qc_path,
+            backend,
+            tactile_events_path=tactile_events_path,
+        )
+
+    command = [
+        str(backend),
+        "--config",
+        str(config_path),
+        "--output-dir",
+        str(output_dir),
+        "--manifest",
+        str(manifest_path),
+        "--qc",
+        str(qc_path),
+    ]
+    completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
+    if completed.returncode != 0:
+        message = (completed.stderr or completed.stdout or "3DTI renderer failed.").strip()
+        write_manifest(
+            manifest_path,
+            status="backend_failed",
+            config=config,
+            backend_executable=backend,
+            message=message,
+            render_engine="native-3dti",
+            tactile_events_path=tactile_events_path,
+        )
+        return RenderResult(
+            "backend_failed",
+            completed.returncode,
+            output_dir,
+            config_path,
+            manifest_path,
+            qc_path,
+            backend,
+            tactile_events_path=tactile_events_path,
+        )
+
+    wav_paths = [path for path in _expected_wav_paths(config, output_dir) if path.exists()]
+    postprocess_native_manifest(
+        manifest_path,
+        config=config,
+        backend_executable=backend,
+        wav_paths=wav_paths,
+        tactile_events_path=tactile_events_path,
+    )
+    return RenderResult(
+        "rendered_3dti",
+        0,
+        output_dir,
+        config_path,
+        manifest_path,
+        qc_path,
+        backend,
+        tuple(wav_paths),
+        tactile_events_path=tactile_events_path,
+    )
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Render a saved PPS design through the pinned 3DTI backend.")
+    parser.add_argument("--design", type=Path, required=True, help="Saved StimulusDesign JSON or study profile JSON.")
+    parser.add_argument("--output-dir", type=Path, required=True, help="Directory for WAV, manifest, and QC outputs.")
+    parser.add_argument("--seed", type=int, default=20250604, help="Deterministic dry-noise seed.")
+    parser.add_argument("--backend", type=Path, help="Path to pps-3dti-renderer.exe. Defaults to PPS_3DTI_RENDERER or third_party path.")
+    parser.add_argument(
+        "--engine",
+        choices=RENDER_ENGINES,
+        default="auto",
+        help="Render engine. auto uses native 3DTI when available, otherwise the Python SOFA/FABIAN reference renderer.",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Only write the 3DTI render config and QC scaffolding.")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    result = render_design_with_3dti(
+        args.design,
+        args.output_dir,
+        seed=args.seed,
+        backend_executable=args.backend,
+        dry_run=args.dry_run,
+        engine=args.engine,
+    )
+    print(f"3DTI render status: {result.status}")
+    print(f"  config: {result.config_path}")
+    print(f"  manifest: {result.manifest_path}")
+    print(f"  qc: {result.qc_path}")
+    if result.tactile_events_path:
+        print(f"  tactile events: {result.tactile_events_path}")
+    for wav_path in result.wav_paths:
+        print(f"  wav: {wav_path}")
+    return result.exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
