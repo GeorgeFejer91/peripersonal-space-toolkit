@@ -34,9 +34,10 @@ native Focus Mode backends; it does not move validated participant timing into
 browser JavaScript.
 
 The HTML dashboard is organized as a one-page workflow with a fixed floating
-left navigation rail. The rail includes layout controls for the preview column
-and trajectory-preview height so researchers can resize the working panels
-without leaving the page.
+left navigation rail. The rail includes persistent layout controls for main
+panel width, preview-column width, trajectory-preview height, panel padding,
+and panel spacing, plus a reset action, so researchers can resize the working
+panels without leaving the page.
 
 The dashboard can also be served as a GitHub Pages site. In that mode, start
 `windows\Start_Website_Companion.bat` on the research PC and use the left-rail

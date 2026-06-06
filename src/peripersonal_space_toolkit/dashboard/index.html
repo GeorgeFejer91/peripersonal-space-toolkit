@@ -23,10 +23,17 @@
       </nav>
       <div class="layout-controls" aria-label="Panel layout">
         <div class="layout-title">Panel Layout</div>
+        <label for="layout-panel-width"><span>Panel width</span><output id="layout-panel-width-value"></output></label>
+        <input id="layout-panel-width" type="range" min="520" max="900" step="20">
         <label for="layout-side-width"><span>Preview column</span><output id="layout-side-width-value"></output></label>
         <input id="layout-side-width" type="range" min="360" max="640" step="10">
         <label for="layout-preview-height"><span>Preview height</span><output id="layout-preview-height-value"></output></label>
         <input id="layout-preview-height" type="range" min="300" max="620" step="10">
+        <label for="layout-panel-padding"><span>Panel padding</span><output id="layout-panel-padding-value"></output></label>
+        <input id="layout-panel-padding" type="range" min="9" max="24" step="1">
+        <label for="layout-panel-gap"><span>Panel spacing</span><output id="layout-panel-gap-value"></output></label>
+        <input id="layout-panel-gap" type="range" min="8" max="26" step="1">
+        <button id="layout-reset" type="button">Reset Layout</button>
       </div>
       <div class="companion-panel" aria-label="Local companion backend">
         <div class="layout-title">Local Companion</div>

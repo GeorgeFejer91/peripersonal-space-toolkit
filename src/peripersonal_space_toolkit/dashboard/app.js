@@ -17,8 +17,18 @@ const NEXT_STEP = {
   run: "review"
 };
 const LAYOUT_DEFAULTS = {
+  panelWidth: 520,
   sideWidth: 460,
-  previewHeight: 360
+  previewHeight: 360,
+  panelPadding: 13,
+  panelGap: 14
+};
+const LAYOUT_FIELDS = {
+  panelWidth: { id: "layout-panel-width", valueId: "layout-panel-width-value", min: 520, max: 900, unit: "px" },
+  sideWidth: { id: "layout-side-width", valueId: "layout-side-width-value", min: 360, max: 640, unit: "px" },
+  previewHeight: { id: "layout-preview-height", valueId: "layout-preview-height-value", min: 300, max: 620, unit: "px" },
+  panelPadding: { id: "layout-panel-padding", valueId: "layout-panel-padding-value", min: 9, max: 24, unit: "px" },
+  panelGap: { id: "layout-panel-gap", valueId: "layout-panel-gap-value", min: 8, max: 26, unit: "px" }
 };
 const LOCAL_BACKEND_DEFAULT = "http://127.0.0.1:8766";
 
@@ -161,15 +171,27 @@ function renderStudy() {
     select.appendChild(option);
   }
   $("design-name").value = state.design.name || "";
-  const current = state.templates.find((item) => item.template_id === state.selected_template);
+  renderProfileSummary();
+}
+
+function renderProfileSummary() {
+  const selectedId = $("template-select").value;
+  const current = state.templates.find((item) => item.template_id === selectedId);
+  const loaded = Boolean(current && current.template_id === state.selected_template);
   const lines = [];
   if (current) {
-    lines.push(`<div>${escapeHtml(current.citation_label)}</div>`);
+    lines.push(`<div><strong>${loaded ? "Loaded profile" : "Selected preload"}:</strong> ${escapeHtml(current.citation_label)}</div>`);
     if (current.doi) {
+      const href = doiUrl(current.doi);
       lines.push(
-        `<div>DOI: <a href="${escapeAttr(doiUrl(current.doi))}" target="_blank" rel="noopener noreferrer">${escapeHtml(current.doi)}</a></div>`
+        `<div><strong>DOI URL:</strong> <a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a></div>`
+      );
+    } else if (current.source_url) {
+      lines.push(
+        `<div><strong>Source:</strong> <a href="${escapeAttr(current.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(current.source_url)}</a></div>`
       );
     }
+    if (!loaded) lines.push("<div>Pending load.</div>");
     if (current.notes) lines.push(`<div>${escapeHtml(current.notes)}</div>`);
   } else {
     lines.push("<div>Custom design selected.</div>");
@@ -620,28 +642,54 @@ function updateActiveNav() {
 }
 
 function loadLayoutSettings() {
-  const sideWidth = clampNumber(Number(localStorage.getItem("ppsDashboard.sideWidth")), 360, 640, LAYOUT_DEFAULTS.sideWidth);
-  const previewHeight = clampNumber(Number(localStorage.getItem("ppsDashboard.previewHeight")), 300, 620, LAYOUT_DEFAULTS.previewHeight);
-  applyLayoutSettings({ sideWidth, previewHeight });
+  const next = {};
+  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
+    next[key] = clampNumber(Number(localStorage.getItem(`ppsDashboard.${key}`)), field.min, field.max, LAYOUT_DEFAULTS[key]);
+  }
+  applyLayoutSettings(next);
 }
 
-function applyLayoutSettings({ sideWidth, previewHeight }) {
-  document.documentElement.style.setProperty("--side-column-width", `${sideWidth}px`);
-  document.documentElement.style.setProperty("--preview-height", `${previewHeight}px`);
-  $("layout-side-width").value = String(sideWidth);
-  $("layout-preview-height").value = String(previewHeight);
-  $("layout-side-width-value").textContent = `${sideWidth}px`;
-  $("layout-preview-height-value").textContent = `${previewHeight}px`;
+function applyLayoutSettings(layout) {
+  document.documentElement.style.setProperty("--main-column-min", `${layout.panelWidth}px`);
+  document.documentElement.style.setProperty("--side-column-width", `${layout.sideWidth}px`);
+  document.documentElement.style.setProperty("--preview-height", `${layout.previewHeight}px`);
+  document.documentElement.style.setProperty("--panel-padding", `${layout.panelPadding}px`);
+  document.documentElement.style.setProperty("--panel-gap", `${layout.panelGap}px`);
+  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
+    const value = layout[key];
+    $(field.id).value = String(value);
+    $(field.valueId).textContent = `${value}${field.unit}`;
+  }
 }
 
 function updateLayoutSetting(key, value) {
-  const next = {
-    sideWidth: Number($("layout-side-width").value),
-    previewHeight: Number($("layout-preview-height").value)
-  };
-  next[key] = Number(value);
-  localStorage.setItem(`ppsDashboard.${key}`, String(next[key]));
+  const next = currentLayoutSettings();
+  const field = LAYOUT_FIELDS[key];
+  next[key] = clampNumber(Number(value), field.min, field.max, LAYOUT_DEFAULTS[key]);
+  saveLayoutSettings(next);
   applyLayoutSettings(next);
+}
+
+function currentLayoutSettings() {
+  const next = {};
+  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
+    next[key] = clampNumber(Number($(field.id).value), field.min, field.max, LAYOUT_DEFAULTS[key]);
+  }
+  return next;
+}
+
+function saveLayoutSettings(layout) {
+  for (const key of Object.keys(LAYOUT_FIELDS)) {
+    localStorage.setItem(`ppsDashboard.${key}`, String(layout[key]));
+  }
+}
+
+function resetLayoutSettings() {
+  for (const key of Object.keys(LAYOUT_FIELDS)) {
+    localStorage.removeItem(`ppsDashboard.${key}`);
+  }
+  applyLayoutSettings({ ...LAYOUT_DEFAULTS });
+  showToast("Layout reset");
 }
 
 function clampNumber(value, min, max, fallback) {
@@ -721,6 +769,7 @@ function wireEvents() {
     }
   });
   $("load-template").addEventListener("click", () => loadTemplate().catch(reportError));
+  $("template-select").addEventListener("change", renderProfileSummary);
   $("render-action").addEventListener("click", () => startRender().catch(reportError));
   $("prepare-action").addEventListener("click", () => prepareSession().catch(reportError));
   $("stress-action").addEventListener("click", () => stressAudio().catch(reportError));
@@ -732,8 +781,10 @@ function wireEvents() {
     if (frame.contentWindow.resetTrajectoryCamera) frame.contentWindow.resetTrajectoryCamera();
   });
   $("preview-mode").addEventListener("change", () => setPreviewMode($("preview-mode").value));
-  $("layout-side-width").addEventListener("input", () => updateLayoutSetting("sideWidth", $("layout-side-width").value));
-  $("layout-preview-height").addEventListener("input", () => updateLayoutSetting("previewHeight", $("layout-preview-height").value));
+  for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
+    $(field.id).addEventListener("input", () => updateLayoutSetting(key, $(field.id).value));
+  }
+  $("layout-reset").addEventListener("click", resetLayoutSettings);
   for (const button of document.querySelectorAll("[data-preview-mode]")) {
     button.addEventListener("click", () => setPreviewMode(button.dataset.previewMode));
   }
