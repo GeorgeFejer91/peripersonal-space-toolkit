@@ -169,7 +169,7 @@ locomotor, VR, speaker-array, or proprietary-sound manipulations. The FABIAN
 neutral HRIR remains the standardized under-the-hood renderer resource for
 everyone.
 
-The profile selector displays paper-like labels, for example author/year plus the article title where the template citation can be parsed. Use the `Citation` button to inspect or export the selected profile citation. Exported BibTeX and CSL JSON are generated from each template's stored `citation`, `doi`, `source_url`, verification status, and template id.
+The profile selector displays paper-like labels, for example author/year plus the article title where the template citation can be parsed. In the HTML dashboard, choosing a published preload or `Custom design (define manually)` from the selector loads that profile immediately without a separate load button. Use the `Citation` button in the Qt comparison UI to inspect or export the selected profile citation. Exported BibTeX and CSL JSON are generated from each template's stored `citation`, `doi`, `source_url`, verification status, and template id.
 
 ## Visual QA
 

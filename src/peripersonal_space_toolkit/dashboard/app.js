@@ -43,6 +43,7 @@ const TRAJECTORY_FIELD_IDS = [
 
 const $ = (id) => document.getElementById(id);
 let apiBase = "";
+let templateLoadInFlight = false;
 
 async function api(path, options = {}) {
   let response;
@@ -511,12 +512,21 @@ async function continueWorkflowStep(stepId) {
 }
 
 async function loadTemplate() {
-  const id = $("template-select").value;
+  if (templateLoadInFlight) return;
+  const select = $("template-select");
+  const id = select.value;
   if (!id) return;
-  state = await api(`/api/templates/${encodeURIComponent(id)}/load`, { method: "POST" });
-  renderAll();
-  updateViewer();
-  showToast(id === CUSTOM_TEMPLATE_ID ? "Custom design started" : "Profile loaded");
+  templateLoadInFlight = true;
+  select.disabled = true;
+  try {
+    state = await api(`/api/templates/${encodeURIComponent(id)}/load`, { method: "POST" });
+    renderAll();
+    updateViewer();
+    showToast(id === CUSTOM_TEMPLATE_ID ? "Custom design started" : "Profile loaded");
+  } finally {
+    templateLoadInFlight = false;
+    $("template-select").disabled = false;
+  }
 }
 
 async function startRender() {
@@ -843,8 +853,10 @@ function wireEvents() {
       loadState().catch(reportError);
     }
   });
-  $("load-template").addEventListener("click", () => loadTemplate().catch(reportError));
-  $("template-select").addEventListener("change", renderProfileSummary);
+  $("template-select").addEventListener("change", () => {
+    renderProfileSummary();
+    loadTemplate().catch(reportError);
+  });
   $("render-action").addEventListener("click", () => startRender().catch(reportError));
   $("prepare-action").addEventListener("click", () => prepareSession().catch(reportError));
   $("stress-action").addEventListener("click", () => stressAudio().catch(reportError));
