@@ -21,12 +21,14 @@ from pathlib import Path
 from typing import Any
 
 from .design import (
+    CUSTOM_AUDIO_NOISE_TYPE,
     DEFAULT_SOFA_FILE,
     StimulusDesign,
     cartesian_to_spherical,
     design_from_dict,
     design_to_dict,
     protocol_factor_pairs,
+    protocol_sound_sources,
     protocol_summary,
     trajectory_point_at_time,
     trajectory_points_with_holds,
@@ -122,14 +124,23 @@ def load_render_design(path: Path) -> StimulusDesign:
 
 
 def _noise_rows(design: StimulusDesign) -> list[dict[str, Any]]:
-    return [
-        {
-            "label": noise.label,
-            "noise_type": noise.noise_type,
-            "gain": noise.gain,
+    rows: list[dict[str, Any]] = []
+    for source in protocol_sound_sources(design):
+        row = {
+            "label": source["label"],
+            "noise_type": source["noise_type"],
+            "gain": source.get("gain", 1.0),
         }
-        for noise in design.noises
-    ]
+        if source["noise_type"] == CUSTOM_AUDIO_NOISE_TYPE:
+            row.update(
+                {
+                    "source_kind": "imported_audio",
+                    "path": source.get("source_path", ""),
+                    "target_duration_s": source.get("target_duration_s", 0.0),
+                }
+            )
+        rows.append(row)
+    return rows
 
 
 def _listener_head_diameter_m(design: StimulusDesign) -> float:
@@ -201,6 +212,89 @@ def _generate_noise(noise_type: str, samples: int, sample_rate: int, seed: int) 
         raise ValueError(f"Unsupported noise type: {noise_type}")
     peak = float(np.max(np.abs(result))) if samples else 0.0
     return result / peak if peak > 0 else result
+
+
+def _has_imported_audio_sources(config: dict[str, Any]) -> bool:
+    return any(source.get("source_kind") == "imported_audio" for source in config["source"]["noises"])
+
+
+def _read_imported_audio_source(source: dict[str, Any], sample_rate: int, total_samples: int) -> tuple["Any", int, int]:
+    import numpy as np
+    import soundfile as sf
+    from scipy import signal
+
+    path = repo_relative_path(str(source.get("path", "")))
+    data, source_rate = sf.read(str(path), dtype="float32", always_2d=True)
+    source_channels = int(data.shape[1])
+    if source_rate != sample_rate:
+        divisor = math.gcd(int(source_rate), int(sample_rate))
+        data = signal.resample_poly(data, sample_rate // divisor, source_rate // divisor, axis=0)
+    if len(data) > total_samples:
+        data = data[:total_samples, :]
+    elif len(data) < total_samples:
+        padding = np.zeros((total_samples - len(data), data.shape[1]), dtype=data.dtype)
+        data = np.concatenate([data, padding], axis=0)
+    return data, int(source_rate), source_channels
+
+
+def _render_imported_audio_source(
+    source: dict[str, Any],
+    *,
+    config: dict[str, Any],
+    tactile: "Any",
+    output_dir: Path,
+    sample_rate: int,
+    total_samples: int,
+) -> tuple[Path, dict[str, Any]]:
+    import numpy as np
+    import soundfile as sf
+
+    data, source_rate, source_channels = _read_imported_audio_source(source, sample_rate, total_samples)
+    if data.shape[1] == 1:
+        stereo = np.column_stack([data[:, 0], data[:, 0]])
+        tactile_channel = tactile
+    elif data.shape[1] == 2:
+        stereo = data[:, :2]
+        tactile_channel = tactile
+    else:
+        stereo = data[:, :2]
+        tactile_channel = data[:, 2]
+    gain = float(source.get("gain", 1.0) or 1.0)
+    rendered = np.column_stack([stereo * gain, tactile_channel])
+    peak = float(np.max(np.abs(rendered))) if rendered.size else 0.0
+    if peak > OUTPUT_LIMITER_PEAK:
+        rendered = rendered / peak * OUTPUT_LIMITER_PEAK
+        peak = float(np.max(np.abs(rendered)))
+    wav_path = output_dir / f"looming_{_slug(source['label'])}.wav"
+    sf.write(wav_path, rendered, sample_rate, subtype="PCM_16")
+    peak_dbfs = "-inf" if peak <= 0 else f"{20.0 * math.log10(peak):.3f}"
+    return wav_path, {
+        "status": "rendered_imported_audio",
+        "noise_label": source["label"],
+        "noise_type": source["noise_type"],
+        "source_kind": "imported_audio",
+        "source_path": str(repo_relative_path(str(source.get("path", "")))),
+        "source_sample_rate": source_rate,
+        "source_channels": source_channels,
+        "duration_s": f"{total_samples / sample_rate:.6f}",
+        "sample_rate": sample_rate,
+        "channels": 3,
+        "tactile_events": len(config["tactile"]["events"]),
+        "tactile_channel": 2,
+        "peak_dbfs": peak_dbfs,
+        "clipping": str(peak >= 1.0).lower(),
+        "hrir_positions_used": "",
+        "first_half_left_rms": "",
+        "first_half_right_rms": "",
+        "second_half_left_rms": "",
+        "second_half_right_rms": "",
+        "wav_sha256": sha256_file(wav_path) or "",
+        "message": (
+            "Imported local audio source rendered as binaural left/right plus tactile. "
+            "Mono files are duplicated to both ears; stereo files receive the toolkit tactile channel; "
+            "files with 3+ channels preserve channel 3 as tactile."
+        ),
+    }
 
 
 def _load_sofa_hrirs(sofa_file: str) -> dict[str, Any]:
@@ -305,6 +399,8 @@ def build_render_config(
     sofa_path = repo_relative_path(sofa_file)
     head_diameter_m = _listener_head_diameter_m(design)
     head_radius_m = head_diameter_m / 2.0
+    sources = _noise_rows(design)
+    imported_source_count = sum(1 for source in sources if source.get("source_kind") == "imported_audio")
     return {
         "schema": "pps-3dti-render-config.v1",
         "renderer": {
@@ -363,10 +459,11 @@ def build_render_config(
             "head_model_source": _head_model_source(design),
         },
         "source": {
-            "type": "generated_noise",
+            "type": "mixed_procedural_and_imported" if imported_source_count and len(sources) > imported_source_count else ("imported_audio" if imported_source_count else "generated_noise"),
             "seed": seed,
             "sample_rate": sample_rate,
-            "noises": _noise_rows(design),
+            "noises": sources,
+            "imported_audio_count": imported_source_count,
             "gain_law": "3DTI_free_field_direct_path",
             "sofa_file": sofa_file,
             "sofa_file_sha256": sha256_file(sofa_path),
@@ -445,6 +542,10 @@ def write_render_qc(path: Path, rows: list[dict[str, Any]]) -> None:
         "status",
         "noise_label",
         "noise_type",
+        "source_kind",
+        "source_path",
+        "source_sample_rate",
+        "source_channels",
         "duration_s",
         "sample_rate",
         "channels",
@@ -525,9 +626,10 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
     import soundfile as sf
     from scipy import signal
 
-    sofa = _load_sofa_hrirs(config["source"]["sofa_file"])
     sample_rate = int(config["source"]["sample_rate"])
-    if sofa["sample_rate"] != sample_rate:
+    procedural_sources = [source for source in config["source"]["noises"] if source.get("source_kind") != "imported_audio"]
+    sofa = _load_sofa_hrirs(config["source"]["sofa_file"]) if procedural_sources else None
+    if sofa is not None and sofa["sample_rate"] != sample_rate:
         raise RuntimeError(
             f"SOFA sample rate {sofa['sample_rate']} Hz does not match render sample rate {sample_rate} Hz."
         )
@@ -535,7 +637,7 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
     total_samples = max(1, int(round(total_duration * sample_rate)))
     frame_samples = max(16, int(round(float(config["renderer"]["frame_ms"]) / 1000.0 * sample_rate)))
     hop_samples = max(1, int(round(float(config["renderer"]["hop_ms"]) / 1000.0 * sample_rate)))
-    hrir_len = int(sofa["hrirs"].shape[-1])
+    hrir_len = int(sofa["hrirs"].shape[-1]) if sofa is not None else 0
     window = np.sqrt(np.hanning(frame_samples))
     if not np.any(window):
         window = np.ones(frame_samples, dtype=float)
@@ -544,6 +646,18 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
     wav_paths: list[Path] = []
 
     for noise_index, noise in enumerate(config["source"]["noises"]):
+        if noise.get("source_kind") == "imported_audio":
+            wav_path, row = _render_imported_audio_source(
+                noise,
+                config=config,
+                tactile=tactile,
+                output_dir=output_dir,
+                sample_rate=sample_rate,
+                total_samples=total_samples,
+            )
+            wav_paths.append(wav_path)
+            rows.append(row)
+            continue
         dry_seed = int(config["source"]["seed"]) + noise_index * 1009
         dry = _generate_noise(noise["noise_type"], total_samples, sample_rate, dry_seed)
         stereo = np.zeros((total_samples + hrir_len + frame_samples, 2), dtype=float)
@@ -596,6 +710,7 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
                 "status": "rendered_reference",
                 "noise_label": noise["label"],
                 "noise_type": noise["noise_type"],
+                "source_kind": noise.get("source_kind", "procedural_noise"),
                 "duration_s": f"{total_samples / sample_rate:.6f}",
                 "sample_rate": sample_rate,
                 "channels": 3,
@@ -643,6 +758,7 @@ def write_manifest(
         "coordinate_convention": config["coordinate_convention"],
         "duration_s": config["trajectory"]["total_duration_s"],
         "trajectory_samples": len(config["trajectory"]["samples"]),
+        "source": config["source"],
         "tactile_events": {
             "count": len(config["tactile"]["events"]),
             "path": str(tactile_events_path) if tactile_events_path else None,
@@ -733,6 +849,7 @@ def render_design_with_3dti(
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     write_trajectory_qc(trajectory_path, config)
     write_tactile_events_qc(tactile_events_path, config)
+    uses_imported_audio = _has_imported_audio_sources(config)
 
     if dry_run:
         write_manifest(
@@ -754,6 +871,36 @@ def render_design_with_3dti(
             qc_path,
             backend,
             tactile_events_path=tactile_events_path,
+        )
+
+    if uses_imported_audio:
+        if engine == "native-3dti":
+            raise RuntimeError("Imported audio sources require the python-sofa-reference render path.")
+        wav_paths = render_with_python_sofa_reference(config, output_dir, qc_path)
+        message = (
+            "Rendered with the Python reference engine because this design includes local imported audio sources. "
+            "Imported files are read from the research PC by the local backend, not uploaded online."
+        )
+        write_manifest(
+            manifest_path,
+            status="rendered_reference",
+            config=config,
+            backend_executable=backend,
+            message=message,
+            render_engine="python-sofa-reference",
+            wav_paths=wav_paths,
+            tactile_events_path=tactile_events_path,
+        )
+        return RenderResult(
+            "rendered_reference",
+            0,
+            output_dir,
+            config_path,
+            manifest_path,
+            qc_path,
+            backend,
+            tuple(wav_paths),
+            tactile_events_path,
         )
 
     if not backend.exists():
@@ -804,6 +951,7 @@ def render_design_with_3dti(
                     "status": "backend_missing",
                     "noise_label": noise["label"],
                     "noise_type": noise["noise_type"],
+                    "source_kind": noise.get("source_kind", "procedural_noise"),
                     "duration_s": config["trajectory"]["total_duration_s"],
                     "sample_rate": config["source"]["sample_rate"],
                     "peak_dbfs": "",

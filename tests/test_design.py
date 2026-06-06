@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,7 @@ from peripersonal_space_toolkit.design import (
     trajectory_points,
     validate_design,
 )
+from peripersonal_space_toolkit.render_backend import render_design_with_3dti
 from peripersonal_space_toolkit.templates import load_templates
 
 
@@ -62,6 +65,63 @@ def test_design_loads_string_audio_preload_paths():
     assert design.custom_looming_files[0].label == "custom_looming"
     assert design.prestimulus_files[0].target_duration_s == 4.0
 
+
+
+def test_imported_looming_audio_can_render_as_experiment_source(tmp_path: Path):
+    import numpy as np
+    import soundfile as sf
+
+    source_path = tmp_path / "already_looming.wav"
+    source = np.zeros((2205, 2), dtype=np.float32)
+    source[:, 0] = 0.2
+    source[:, 1] = -0.2
+    sf.write(source_path, source, 44100)
+
+    design = default_design()
+    design.noises = []
+    design.custom_looming_files = [AudioFileSpec("Already looming", str(source_path), 0.05)]
+    design.trajectory.path_length_m = 0.05
+    design.trajectory.propagation_speed_mps = 1.0
+    design.trajectory.padding_pre_s = 0.0
+    design.trajectory.padding_post_s = 0.0
+    design.protocol.soa_values_ms = [25]
+    design.protocol.spatial_values_cm = [20.0]
+    design.protocol.pair_spatial_values_with_soas = True
+    design.protocol.include_baseline_trials = False
+    design.protocol.catch_trial_percentage = 0
+    design.protocol.respiratory_phases = ["Inhale"]
+    design.protocol.tactile_sites = ["hand"]
+
+    rows = experiment_schedule_rows(design)
+    assert rows
+    assert rows[0]["noise_label"] == "Already looming"
+    assert rows[0]["noise_type"] == "custom_audio"
+
+    design_path = tmp_path / "design.json"
+    output_dir = tmp_path / "rendered"
+    save_design(design, design_path)
+    result = render_design_with_3dti(
+        design_path,
+        output_dir,
+        seed=123,
+        backend_executable=tmp_path / "present" / "pps-3dti-renderer.exe",
+    )
+
+    assert result.status == "rendered_reference"
+    assert len(result.wav_paths) == 1
+    audio, sample_rate = sf.read(result.wav_paths[0], always_2d=True)
+    assert sample_rate == 44100
+    assert audio.shape == (2205, 3)
+    assert np.max(np.abs(audio[:, 0])) > 0.1
+    assert np.max(np.abs(audio[:, 1])) > 0.1
+    assert np.max(np.abs(audio[:, 2])) > 0.1
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["source"]["type"] == "imported_audio"
+    assert manifest["source"]["imported_audio_count"] == 1
+    with result.qc_path.open(newline="", encoding="utf-8") as f:
+        qc_rows = list(csv.DictReader(f))
+    assert qc_rows[0]["source_kind"] == "imported_audio"
 
 def test_protocol_summary_and_export_use_repetitions_soas_spatial_values_and_catches(tmp_path: Path):
     design = default_design()

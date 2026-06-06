@@ -52,6 +52,8 @@ The dashboard should behave as a one-page local app: a fixed floating left rail,
 
 The same dashboard can be published as a GitHub Pages static site from the repository root. In hosted mode, the page uses relative static assets and connects to the local companion backend at `http://127.0.0.1:8766` by default. The companion backend is still the only trusted process allowed to render, prepare sessions, stress audio, and launch Focus Mode. GitHub Pages must not be treated as an installer or timing engine; it can offer a software download/setup link and then communicate with the local backend after the user starts it.
 
+The browser dashboard is an orchestrator only. It must not upload stimulus files, participant data, generated WAVs, or experiment artifacts to an online service. File-selection/import controls should hand the chosen file to the local companion backend, which stores local copies under ignored local paths and then uses those local paths in the design/render/session pipeline.
+
 The PySide6/Qt designer remains available as `pps-design` / `windows\Launch_Stimulus_Designer.bat` for comparison and fallback. Keep its nested `QSplitter` workspaces and embedded local Three.js trajectory viewer working, but new researcher-facing workflow polish should prefer the HTML dashboard unless the user asks for Qt specifically.
 
 Published-study profiles should look and behave like paper-level preloads, not anonymous parameter presets. The GUI should show citation-like author/year/title labels, keep the current/selected paper annotation visible, and allow BibTeX/CSL JSON citation export from template metadata.

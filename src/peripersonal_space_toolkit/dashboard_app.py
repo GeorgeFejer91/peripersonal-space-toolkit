@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import math
+import re
 import subprocess
 import sys
 import threading
@@ -25,6 +28,7 @@ from .design import (
     SUPPORTED_NOISE_TYPES,
     StimulusDesign,
     azimuth_to_display_rotation_deg,
+    audio_file_summary,
     block_trial_rows,
     cartesian_to_spherical,
     default_design,
@@ -45,6 +49,7 @@ from .templates import StudyTemplate, load_templates, study_template_bibtex, stu
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DESIGN_PATH = REPO_ROOT / "configs" / "stimulus_design.generated.json"
 TEMPLATE_DIR = REPO_ROOT / "study_templates"
+DEFAULT_IMPORT_DIR = REPO_ROOT / "local_data" / "dashboard_audio"
 TRIAL_PREVIEW_LIMIT = 240
 CUSTOM_TEMPLATE_IDS = {"custom", "__custom__"}
 DEFAULT_WEB_ORIGINS = ("https://georgefejer91.github.io",)
@@ -108,11 +113,13 @@ class DashboardController:
         render_dir: Path = DEFAULT_RENDER_DIR,
         session_root: Path = DEFAULT_SESSION_ROOT,
         template_dir: Path = TEMPLATE_DIR,
+        import_dir: Path = DEFAULT_IMPORT_DIR,
     ) -> None:
         self.design_path = Path(design_path)
         self.render_dir = Path(render_dir)
         self.session_root = Path(session_root)
         self.template_dir = Path(template_dir)
+        self.import_dir = Path(import_dir)
         self.templates = load_templates(self.template_dir)
         self.design = self._load_initial_design()
         self.participant_id = "P001"
@@ -250,6 +257,37 @@ class DashboardController:
         with self._lock:
             self.current_run_package = package
         return self.snapshot()
+
+    def import_audio_source(self, payload: dict[str, Any]) -> dict[str, Any]:
+        filename = _safe_filename(str(payload.get("filename") or "audio.wav"))
+        encoded = str(payload.get("content_base64") or "")
+        if not encoded:
+            raise ValueError("Audio import is missing file content.")
+        if "," in encoded:
+            encoded = encoded.split(",", 1)[1]
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except binascii.Error as exc:
+            raise ValueError("Audio import content is not valid base64.") from exc
+        if not content:
+            raise ValueError("Audio import file is empty.")
+
+        self.import_dir.mkdir(parents=True, exist_ok=True)
+        path = self.import_dir / f"{uuid.uuid4().hex[:10]}_{filename}"
+        path.write_bytes(content)
+        label = str(payload.get("label") or Path(filename).stem).strip() or Path(filename).stem
+        duration_s = _float(payload.get("target_duration_s"), 0.0)
+        if duration_s <= 0:
+            try:
+                duration_s = float(audio_file_summary(path)["duration_s"])
+            except Exception:
+                duration_s = 4.0
+        audio = AudioFileSpec(label=label, path=str(path), target_duration_s=duration_s)
+        return {
+            "audio": asdict(audio),
+            "local_only": True,
+            "message": "Stored by the local companion backend; no online upload was performed.",
+        }
 
     def start_audio_stress_job(self) -> DashboardJob:
         command = [
@@ -390,6 +428,13 @@ def create_app(
     @app.post("/api/audio/stress")
     def api_audio_stress() -> dict[str, Any]:
         return _job_to_dict(controller.start_audio_stress_job())
+
+    @app.post("/api/audio/import")
+    def api_audio_import(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+        try:
+            return controller.import_audio_source(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/focus/start")
     def api_focus_start() -> dict[str, Any]:
@@ -613,8 +658,15 @@ def _custom_stimulus_missing(design: StimulusDesign) -> list[str]:
         and noise.gain > 0
         for noise in design.noises
     )
-    if not has_noise:
-        missing.append("Add at least one valid noise definition.")
+    has_imported_source = any(
+        asset.label.strip()
+        and asset.path.strip()
+        and Path(asset.path).expanduser().exists()
+        and asset.target_duration_s > 0
+        for asset in design.custom_looming_files
+    )
+    if not has_noise and not has_imported_source:
+        missing.append("Add at least one procedural noise or custom looming audio source.")
     return missing
 
 
@@ -706,6 +758,12 @@ def _float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _safe_filename(value: str) -> str:
+    name = Path(value).name.strip() or "audio.wav"
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._")
+    return safe or "audio.wav"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

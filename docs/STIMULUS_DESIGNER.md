@@ -44,6 +44,11 @@ The dashboard can also be served as a GitHub Pages site. In that mode, start
 companion controls to connect the hosted page to the local backend. See
 [GitHub Pages Dashboard](GITHUB_PAGES_DASHBOARD.md).
 
+The browser interface is only an orchestrator. It does not upload local
+stimulus files or experiment outputs online. Audio selected in the dashboard is
+imported by the local companion backend and stored in ignored local data before
+being used by the render/session pipeline.
+
 ## Design Controls
 
 The designer has three workflow tabs:
@@ -62,9 +67,9 @@ without a separate Python console window.
 
 The designer currently covers:
 
-- noise definitions for pink, blue, white, and brown noise
+- procedural noise definitions for white, pink, blue, and brown noise
 - per-noise azimuth, elevation, and gain
-- custom looming stimulus files, stored as named preload paths with target duration
+- imported custom looming stimulus files, stored locally as named audio sources with target duration
 - custom prestimulus files, such as 4-second breathing or instruction chunks, stored as named preload paths with target duration
 - `Starting Point` and `End Point` panels where each endpoint is defined by distance from the listener in cm and full 0-360 degree rotation around the listener
 - under-the-hood start/end X/Y/Z sound-source coordinates relative to the listener, derived from those endpoint controls and stored for trajectory generation/export

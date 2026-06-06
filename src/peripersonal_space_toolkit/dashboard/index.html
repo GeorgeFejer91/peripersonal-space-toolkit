@@ -109,7 +109,7 @@
             </div>
 
             <div class="table-toolbar">
-              <span>Noise definitions</span>
+              <span>Procedural noise sources</span>
               <button id="add-noise" type="button">Add Noise</button>
             </div>
             <table class="data-table" id="noise-table">
@@ -127,13 +127,17 @@
             </table>
 
             <div class="table-toolbar">
-              <span>Custom audio files</span>
-              <button id="add-audio" type="button">Add Audio</button>
+              <span>Imported audio sources</span>
+              <div class="toolbar-actions">
+                <button id="import-audio" type="button">Import Audio</button>
+                <button id="add-audio" type="button">Add Path</button>
+              </div>
             </div>
+            <input id="audio-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/mpeg,audio/mp3" hidden>
             <table class="data-table" id="audio-table">
               <thead>
                 <tr>
-                  <th>Use</th>
+                  <th>Role</th>
                   <th>Label</th>
                   <th>Path</th>
                   <th>Target s</th>

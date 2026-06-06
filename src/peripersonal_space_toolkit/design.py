@@ -14,6 +14,7 @@ import numpy as np
 
 
 SUPPORTED_NOISE_TYPES = ("pink", "blue", "white", "brown")
+CUSTOM_AUDIO_NOISE_TYPE = "custom_audio"
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
@@ -288,8 +289,8 @@ def trajectory_endpoints_xyz(spec: TrajectorySpec) -> tuple[dict[str, float], di
 
 def validate_design(design: StimulusDesign) -> list[str]:
     warnings: list[str] = []
-    if not design.noises:
-        warnings.append("At least one noise definition is required.")
+    if not design.noises and not design.custom_looming_files:
+        warnings.append("At least one procedural noise definition or custom looming audio source is required.")
     for noise in design.noises:
         if noise.noise_type.lower() not in SUPPORTED_NOISE_TYPES:
             warnings.append(f"Unsupported noise type for {noise.label}: {noise.noise_type}")
@@ -433,13 +434,14 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     protocol = design.protocol
     factor_pairs = protocol_factor_pairs(protocol)
     repetitions = range(1, protocol.repetitions_per_condition + 1)
+    sound_sources = protocol_sound_sources(design)
 
     for repetition in repetitions:
         for tactile_site in protocol.tactile_sites:
             for motion_direction in protocol.auditory_motion_directions:
                 for phase in protocol.respiratory_phases:
                     for soa_ms, spatial_cm in factor_pairs:
-                        for noise in design.noises:
+                        for source in sound_sources:
                             rows.append(
                                 {
                                     "trial_type": "Audio-Tactile",
@@ -449,10 +451,10 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                                     "phase": phase,
                                     "soa_ms": soa_ms,
                                     "spatial_value_cm": spatial_cm,
-                                    "noise_label": noise.label,
-                                    "noise_type": noise.noise_type,
-                                    "azimuth_deg": noise.azimuth_deg,
-                                    "elevation_deg": noise.elevation_deg,
+                                    "noise_label": source["label"],
+                                    "noise_type": source["noise_type"],
+                                    "azimuth_deg": source["azimuth_deg"],
+                                    "elevation_deg": source["elevation_deg"],
                                 }
                             )
 
@@ -486,7 +488,7 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     else:
         catch_count = 0
 
-    noises = design.noises or [NoiseDefinition("Catch", "white")]
+    noises = sound_sources or [_sound_source_from_noise(NoiseDefinition("Catch", "white"))]
     phases = protocol.respiratory_phases or ["Any"]
     pairs = factor_pairs or [(0, 0.0)]
     tactile_sites = protocol.tactile_sites or ["body"]
@@ -503,13 +505,40 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 "phase": phases[i % len(phases)],
                 "soa_ms": soa_ms,
                 "spatial_value_cm": spatial_cm,
-                "noise_label": noise.label,
-                "noise_type": noise.noise_type,
-                "azimuth_deg": noise.azimuth_deg,
-                "elevation_deg": noise.elevation_deg,
+                "noise_label": noise["label"],
+                "noise_type": noise["noise_type"],
+                "azimuth_deg": noise["azimuth_deg"],
+                "elevation_deg": noise["elevation_deg"],
             }
         )
     return rows
+
+
+def protocol_sound_sources(design: StimulusDesign) -> list[dict[str, Any]]:
+    sources = [_sound_source_from_noise(noise) for noise in design.noises]
+    sources.extend(
+        {
+            "label": asset.label,
+            "noise_type": CUSTOM_AUDIO_NOISE_TYPE,
+            "azimuth_deg": "",
+            "elevation_deg": "",
+            "source_path": asset.path,
+            "target_duration_s": asset.target_duration_s,
+        }
+        for asset in design.custom_looming_files
+        if asset.label.strip() or asset.path.strip()
+    )
+    return sources
+
+
+def _sound_source_from_noise(noise: NoiseDefinition) -> dict[str, Any]:
+    return {
+        "label": noise.label,
+        "noise_type": noise.noise_type,
+        "azimuth_deg": noise.azimuth_deg,
+        "elevation_deg": noise.elevation_deg,
+        "gain": noise.gain,
+    }
 
 
 def _condition_key(row: dict[str, Any]) -> tuple[Any, ...]:

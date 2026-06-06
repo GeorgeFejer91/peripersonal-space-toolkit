@@ -28,6 +28,12 @@ const SPLIT_LIMITS = {
   sideWidth: { min: 320, max: 760 },
   ordersWidth: { min: 300, max: 760 }
 };
+const PROCEDURAL_NOISE_TYPES = [
+  { value: "white", label: "White" },
+  { value: "pink", label: "Pink" },
+  { value: "blue", label: "Blue" },
+  { value: "brown", label: "Brown" }
+];
 const TRAJECTORY_FIELD_IDS = [
   "start-distance",
   "end-distance",
@@ -211,11 +217,12 @@ function renderNoiseTable() {
   body.innerHTML = "";
   for (const noise of state.design.noises || []) {
     const row = body.insertRow();
+    const selectedNoise = String(noise.noise_type || "pink").toLowerCase();
     row.innerHTML = `
       <td><input data-field="label" value="${escapeAttr(noise.label || "")}"></td>
       <td>
         <select data-field="noise_type">
-          ${["pink", "blue", "white", "brown"].map((item) => `<option value="${item}" ${item === noise.noise_type ? "selected" : ""}>${item}</option>`).join("")}
+          ${PROCEDURAL_NOISE_TYPES.map((item) => `<option value="${item.value}" ${item.value === selectedNoise ? "selected" : ""}>${item.label}</option>`).join("")}
         </select>
       </td>
       <td><input data-field="azimuth_deg" type="number" step="1" value="${Number(noise.azimuth_deg || 0)}"></td>
@@ -238,7 +245,7 @@ function renderAudioTable() {
     row.innerHTML = `
       <td>
         <select data-field="use">
-          <option value="looming" ${audio.use === "looming" ? "selected" : ""}>looming</option>
+          <option value="looming" ${audio.use === "looming" ? "selected" : ""}>looming source</option>
           <option value="prestimulus" ${audio.use === "prestimulus" ? "selected" : ""}>prestimulus</option>
         </select>
       </td>
@@ -881,7 +888,7 @@ function clampNumber(value, min, max, fallback) {
 function addNoiseRow() {
   state.design.noises = state.design.noises || [];
   state.design.noises.push({
-    label: "New noise",
+    label: "Pink noise",
     noise_type: "pink",
     azimuth_deg: 0,
     elevation_deg: 0,
@@ -893,11 +900,43 @@ function addNoiseRow() {
 function addAudioRow() {
   state.design.custom_looming_files = state.design.custom_looming_files || [];
   state.design.custom_looming_files.push({
-    label: "Audio file",
+    label: "Custom looming",
     path: "",
     target_duration_s: 4
   });
   renderAudioTable();
+}
+
+async function importAudioFromPicker() {
+  const input = $("audio-file-input");
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file) return;
+  const contentBase64 = await fileToBase64(file);
+  const imported = await api("/api/audio/import", {
+    method: "POST",
+    body: JSON.stringify({
+      filename: file.name,
+      content_base64: contentBase64,
+      use: "looming"
+    })
+  });
+  state.design.custom_looming_files = state.design.custom_looming_files || [];
+  state.design.custom_looming_files.push(imported.audio);
+  renderAudioTable();
+  showToast("Audio imported locally");
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",").pop() : result);
+    });
+    reader.addEventListener("error", () => reject(reader.error || new Error("Could not read audio file")));
+    reader.readAsDataURL(file);
+  });
 }
 
 function removeRowFromButton(button) {
@@ -959,6 +998,8 @@ function wireEvents() {
   $("focus-action").addEventListener("click", () => startFocus().catch(reportError));
   $("add-noise").addEventListener("click", addNoiseRow);
   $("add-audio").addEventListener("click", addAudioRow);
+  $("import-audio").addEventListener("click", () => $("audio-file-input").click());
+  $("audio-file-input").addEventListener("change", () => importAudioFromPicker().catch(reportError));
   $("reset-camera").addEventListener("click", () => {
     const frame = $("trajectory-frame");
     if (frame.contentWindow.resetTrajectoryCamera) frame.contentWindow.resetTrajectoryCamera();

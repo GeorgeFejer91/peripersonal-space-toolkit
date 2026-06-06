@@ -60,7 +60,9 @@ windows\Start_Website_Companion.bat
 Then open the Pages URL. The hosted page connects back to
 `http://127.0.0.1:8766` for local render/session/focus operations; the website
 itself cannot silently install packages or run experiments without the local
-companion. See [docs/GITHUB_PAGES_DASHBOARD.md](docs/GITHUB_PAGES_DASHBOARD.md).
+companion. It also does not upload selected stimulus files, generated WAVs, or
+experiment outputs online; audio import and all experiment operations stay on
+the research PC. See [docs/GITHUB_PAGES_DASHBOARD.md](docs/GITHUB_PAGES_DASHBOARD.md).
 
 Open the Qt stimulus designer for comparison:
 

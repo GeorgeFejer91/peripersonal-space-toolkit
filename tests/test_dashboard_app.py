@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import time
 from importlib.resources import files
@@ -66,6 +67,7 @@ def _client(tmp_path: Path) -> TestClient:
         design_path=design_path,
         render_dir=_render_dir(tmp_path),
         session_root=tmp_path / "sessions",
+        import_dir=tmp_path / "imports",
     )
     return TestClient(create_app(controller))
 
@@ -89,6 +91,7 @@ def test_dashboard_static_assets_are_packaged():
     assert 'href="styles.css"' in html
     assert 'src="app.js"' in html
     assert 'src="../viewer/index.html"' in html
+    assert 'id="audio-file-input"' in html
     assert "/api/" not in html
 
 
@@ -167,6 +170,27 @@ def test_dashboard_state_templates_and_design_update(tmp_path: Path):
     assert updated["participant_id"] == "Subject 01"
     assert updated["design"]["name"] == "Browser prototype design"
     assert updated["viewer_payload"]["path_length_m"] > 0
+
+
+def test_dashboard_import_audio_is_local_only(tmp_path: Path):
+    client = _client(tmp_path)
+    source = tmp_path / "manual_loom.wav"
+    sf.write(source, np.zeros((441, 2), dtype=np.float32), 44100)
+    payload = {
+        "filename": source.name,
+        "content_base64": base64.b64encode(source.read_bytes()).decode("ascii"),
+        "use": "looming",
+    }
+
+    imported = client.post("/api/audio/import", json=payload).json()
+
+    assert imported["local_only"] is True
+    assert "online upload" in imported["message"]
+    stored = Path(imported["audio"]["path"])
+    assert stored.exists()
+    assert stored.parent == tmp_path / "imports"
+    assert imported["audio"]["label"] == "manual_loom"
+    assert imported["audio"]["target_duration_s"] > 0
 
 
 def test_dashboard_render_job_uses_existing_render_backend(tmp_path: Path, monkeypatch):

@@ -9,6 +9,9 @@ experiment software runs locally on the research PC.
 - The local companion backend runs on the PC at `http://127.0.0.1:8766`.
 - The hosted page calls the companion API for design state, render jobs, session
   preparation, audio stress tests, and native Focus Mode launch.
+- File imports are local companion actions. Selected stimulus audio is copied
+  into ignored local data on the research PC; it is not uploaded to GitHub
+  Pages or any online service.
 - Browser JavaScript does not own experiment timing. Timing-sensitive participant
   runs stay native/Python-backed.
 
