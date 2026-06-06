@@ -31,6 +31,15 @@ const LAYOUT_FIELDS = {
   panelGap: { id: "layout-panel-gap", valueId: "layout-panel-gap-value", min: 8, max: 26, unit: "px" }
 };
 const LOCAL_BACKEND_DEFAULT = "http://127.0.0.1:8766";
+const TRAJECTORY_FIELD_IDS = [
+  "start-distance",
+  "end-distance",
+  "start-rotation",
+  "end-rotation",
+  "movement-duration",
+  "start-hold",
+  "end-hold"
+];
 
 const $ = (id) => document.getElementById(id);
 let apiBase = "";
@@ -566,8 +575,7 @@ async function pollJob(jobId) {
 function updateViewer() {
   if (!state || !viewerReady) return;
   const frame = $("trajectory-frame");
-  const payload = clone(state.viewer_payload || {});
-  payload.preview_mode = $("preview-mode").value || "2d";
+  const payload = trajectoryPayloadFromControls();
   syncPreviewModeControls(payload.preview_mode);
   frame.contentWindow.updateTrajectory(payload);
 }
@@ -577,6 +585,88 @@ function setPreviewMode(mode) {
   $("preview-mode").value = nextMode;
   syncPreviewModeControls(nextMode);
   updateViewer();
+}
+
+function currentTrajectoryControls() {
+  return {
+    start_distance_cm: clampNumber(numberValue("start-distance", 110), 1, 1000, 110),
+    end_distance_cm: clampNumber(numberValue("end-distance", 10), 1, 1000, 10),
+    start_rotation_deg: normalizeRotationDeg(numberValue("start-rotation", 0)),
+    end_rotation_deg: normalizeRotationDeg(numberValue("end-rotation", 0)),
+    movement_duration_s: Math.max(0.1, numberValue("movement-duration", 3)),
+    start_hold_s: Math.max(0, numberValue("start-hold", 0.5)),
+    end_hold_s: Math.max(0, numberValue("end-hold", 0.5))
+  };
+}
+
+function trajectoryPayloadFromControls() {
+  const controls = currentTrajectoryControls();
+  const start = pointFromDistanceRotation(controls.start_distance_cm, controls.start_rotation_deg);
+  const end = pointFromDistanceRotation(controls.end_distance_cm, controls.end_rotation_deg);
+  const pathLength = distance3d(start, end);
+  const radius = Math.max(0.1, controls.start_distance_cm / 100, controls.end_distance_cm / 100);
+  return {
+    ...clone(state.viewer_payload || {}),
+    preview_mode: $("preview-mode").value || "2d",
+    radius_m: radius,
+    path_length_m: pathLength,
+    movement_duration_s: controls.movement_duration_s,
+    start,
+    end,
+    controls
+  };
+}
+
+function pointFromDistanceRotation(distanceCm, rotationDeg) {
+  const radiusM = distanceCm / 100;
+  const radians = (normalizeSignedRotationDeg(rotationDeg) * Math.PI) / 180;
+  return {
+    x_m: radiusM * Math.sin(radians),
+    y_m: radiusM * Math.cos(radians),
+    z_m: 0
+  };
+}
+
+function distance3d(start, end) {
+  const dx = Number(start.x_m || 0) - Number(end.x_m || 0);
+  const dy = Number(start.y_m || 0) - Number(end.y_m || 0);
+  const dz = Number(start.z_m || 0) - Number(end.z_m || 0);
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function normalizeRotationDeg(value) {
+  const rotation = Number(value);
+  if (!Number.isFinite(rotation)) return 0;
+  return ((rotation % 360) + 360) % 360;
+}
+
+function normalizeSignedRotationDeg(value) {
+  return ((normalizeRotationDeg(value) + 180) % 360) - 180;
+}
+
+function applyTrajectoryControlUpdate(controls) {
+  const fields = {
+    start_distance_cm: "start-distance",
+    end_distance_cm: "end-distance",
+    start_rotation_deg: "start-rotation",
+    end_rotation_deg: "end-rotation",
+    movement_duration_s: "movement-duration",
+    start_hold_s: "start-hold",
+    end_hold_s: "end-hold"
+  };
+  for (const [key, id] of Object.entries(fields)) {
+    if (controls[key] === undefined) continue;
+    $(id).value = formatTrajectoryValue(key, controls[key]);
+  }
+  state.trajectory_controls = { ...(state.trajectory_controls || {}), ...currentTrajectoryControls() };
+  updateViewer();
+}
+
+function formatTrajectoryValue(key, value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "";
+  const decimals = key.endsWith("_deg") || key.endsWith("_cm") ? 1 : 2;
+  return String(Number(numeric.toFixed(decimals)));
 }
 
 function syncPreviewModeControls(mode) {
@@ -766,6 +856,9 @@ function wireEvents() {
     if (frame.contentWindow.resetTrajectoryCamera) frame.contentWindow.resetTrajectoryCamera();
   });
   $("preview-mode").addEventListener("change", () => setPreviewMode($("preview-mode").value));
+  for (const id of TRAJECTORY_FIELD_IDS) {
+    $(id).addEventListener("input", updateViewer);
+  }
   for (const [key, field] of Object.entries(LAYOUT_FIELDS)) {
     $(field.id).addEventListener("input", () => updateLayoutSetting(key, $(field.id).value));
   }
@@ -790,6 +883,13 @@ function wireEvents() {
     });
   }
   window.addEventListener("scroll", updateActiveNav, { passive: true });
+  window.addEventListener("message", (event) => {
+    const frame = $("trajectory-frame");
+    if (event.source !== frame.contentWindow) return;
+    const data = event.data || {};
+    if (data.type !== "pps-trajectory-control-change") return;
+    applyTrajectoryControlUpdate(data.controls || {});
+  });
   $("trajectory-frame").addEventListener("load", () => {
     viewerReady = true;
     updateViewer();

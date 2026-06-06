@@ -31,6 +31,14 @@ controls.update();
 let currentViewMode = "3d";
 let currentRadius = 1.1;
 const HEAD_CENTER_Y = 1.33;
+const DISTANCE_CM_MIN = 1;
+const DISTANCE_CM_MAX = 1000;
+const pointer = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const dragPoint = new THREE.Vector3();
+const dragHandles = new Map();
+let activeDragHandle = "";
 
 function applyCameraMode(mode, resetCamera = false) {
   if (mode === "2d") {
@@ -77,6 +85,65 @@ scene.add(dynamicGroup);
 
 function appToThree(point, flattenHeight = false) {
   return new THREE.Vector3(point.x_m, flattenHeight ? 0 : point.z_m, -point.y_m);
+}
+
+function threeToTrajectoryControls(position, handle) {
+  const appX = position.x;
+  const appY = -position.z;
+  const distanceCm = clamp(Math.sqrt(appX * appX + appY * appY) * 100, DISTANCE_CM_MIN, DISTANCE_CM_MAX);
+  const rotationDeg = normalizeRotationDeg((Math.atan2(appX, appY) * 180) / Math.PI);
+  if (handle === "start") {
+    return {
+      start_distance_cm: distanceCm,
+      start_rotation_deg: rotationDeg
+    };
+  }
+  return {
+    end_distance_cm: distanceCm,
+    end_rotation_deg: rotationDeg
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeRotationDeg(value) {
+  return ((value % 360) + 360) % 360;
+}
+
+function setPointerFromEvent(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function intersectDragHandle(event) {
+  if (currentViewMode !== "2d") return "";
+  const handles = [...dragHandles.values()].filter(Boolean);
+  if (!handles.length) return "";
+  setPointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(handles, false)[0];
+  return hit?.object?.userData?.dragHandle || "";
+}
+
+function intersectTrajectoryPlane(event) {
+  setPointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+  return raycaster.ray.intersectPlane(dragPlane, dragPoint);
+}
+
+function emitTrajectoryControlChange(handle, point) {
+  const controls = threeToTrajectoryControls(point, handle);
+  window.parent.postMessage(
+    {
+      type: "pps-trajectory-control-change",
+      handle,
+      controls
+    },
+    "*"
+  );
 }
 
 function addAvatar() {
@@ -156,15 +223,24 @@ function addArrowHead(start, end, material) {
 }
 
 function drawScene(payload) {
+  dragHandles.clear();
   dynamicGroup.clear();
 
   const mode = payload.preview_mode === "2d" ? "2d" : "3d";
   const is2D = mode === "2d";
   const radius = Math.max(0.1, payload.radius_m || 1.1);
   const modeChanged = currentViewMode !== mode;
+  const radiusChanged = Math.abs(currentRadius - radius) > 0.001;
   currentViewMode = mode;
   currentRadius = radius;
-  applyCameraMode(mode, modeChanged);
+  if (!is2D) {
+    if (activeDragHandle) {
+      activeDragHandle = "";
+      controls.enabled = true;
+    }
+    renderer.domElement.style.cursor = "";
+  }
+  applyCameraMode(mode, modeChanged || (is2D && radiusChanged));
 
   if (is2D) {
     const disk = new THREE.Mesh(
@@ -202,9 +278,13 @@ function drawScene(payload) {
 
   const startMarker = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.045, radius * 0.045), 24, 16), new THREE.MeshStandardMaterial({ color: 0xa8d672 }));
   startMarker.position.copy(start);
+  startMarker.userData.dragHandle = "start";
+  dragHandles.set("start", startMarker);
   dynamicGroup.add(startMarker);
   const endMarker = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.045, radius * 0.045), 24, 16), new THREE.MeshStandardMaterial({ color: 0xdf7c52 }));
   endMarker.position.copy(end);
+  endMarker.userData.dragHandle = "end";
+  dragHandles.set("end", endMarker);
   dynamicGroup.add(endMarker);
 
   const labelLift = is2D ? 0.02 : 0.08;
@@ -238,7 +318,12 @@ function drawScene(payload) {
     height_visible: !is2D,
     camera_locked_top_down: is2D,
     path_length_m: payload.path_length_m.toFixed(3),
-    camera_max_polar_angle: controls.maxPolarAngle.toFixed(6)
+    camera_max_polar_angle: controls.maxPolarAngle.toFixed(6),
+    drag_enabled: is2D,
+    start_distance_cm: payload.controls?.start_distance_cm ?? "",
+    end_distance_cm: payload.controls?.end_distance_cm ?? "",
+    start_rotation_deg: payload.controls?.start_rotation_deg ?? "",
+    end_rotation_deg: payload.controls?.end_rotation_deg ?? ""
   };
   container.dataset.viewerReady = "true";
   container.dataset.viewMode = mode;
@@ -246,6 +331,43 @@ function drawScene(payload) {
   container.dataset.cameraLockedTopDown = String(is2D);
   container.dataset.pathLengthM = window.__trajectoryViewerState.path_length_m;
   container.dataset.cameraMaxPolarAngle = window.__trajectoryViewerState.camera_max_polar_angle;
+  container.dataset.dragEnabled = String(is2D);
+  container.dataset.startDistanceCm = String(window.__trajectoryViewerState.start_distance_cm);
+  container.dataset.endDistanceCm = String(window.__trajectoryViewerState.end_distance_cm);
+  container.dataset.startRotationDeg = String(window.__trajectoryViewerState.start_rotation_deg);
+  container.dataset.endRotationDeg = String(window.__trajectoryViewerState.end_rotation_deg);
+}
+
+function handlePointerDown(event) {
+  const handle = intersectDragHandle(event);
+  if (!handle) return;
+  event.preventDefault();
+  activeDragHandle = handle;
+  controls.enabled = false;
+  renderer.domElement.style.cursor = "grabbing";
+  renderer.domElement.setPointerCapture(event.pointerId);
+  const point = intersectTrajectoryPlane(event);
+  if (point) emitTrajectoryControlChange(activeDragHandle, point);
+}
+
+function handlePointerMove(event) {
+  if (activeDragHandle) {
+    event.preventDefault();
+    const point = intersectTrajectoryPlane(event);
+    if (point) emitTrajectoryControlChange(activeDragHandle, point);
+    return;
+  }
+  renderer.domElement.style.cursor = intersectDragHandle(event) ? "grab" : "";
+}
+
+function handlePointerUp(event) {
+  if (!activeDragHandle) return;
+  activeDragHandle = "";
+  controls.enabled = true;
+  renderer.domElement.style.cursor = "";
+  if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+    renderer.domElement.releasePointerCapture(event.pointerId);
+  }
 }
 
 function resize() {
@@ -274,6 +396,11 @@ drawScene({
 });
 resize();
 animate();
+
+renderer.domElement.addEventListener("pointerdown", handlePointerDown);
+renderer.domElement.addEventListener("pointermove", handlePointerMove);
+renderer.domElement.addEventListener("pointerup", handlePointerUp);
+renderer.domElement.addEventListener("pointercancel", handlePointerUp);
 
 window.updateTrajectory = function updateTrajectory(payload) {
   drawScene(payload);

@@ -81,7 +81,8 @@ The designer currently covers:
 - paper-level preload annotation in the profile bar, showing which published paper the selected profile is based on
 - `Citation` actions for the selected profile: show the source citation, save BibTeX, or save CSL JSON for citation managers
 - paired SOA/spatial values for distance-at-tactile designs, or full-factorial SOA x spatial designs for broader PPS variants
-- one embedded trajectory preview with `2D bird's-eye` and `3D orbit` modes; 2D is the default, hides height, and locks the camera to a top-down view
+- one embedded trajectory preview with `2D bird's-eye` and `3D orbit` modes; 2D is the default, hides height, locks the camera to a top-down view, and lets researchers drag the start/end markers to update the matching distance and rotation controls
+- live stimulus-preview synchronization: editing trajectory fields updates the preview immediately, and 2D marker drags update the Stimulus Design fields immediately; Apply/Continue/Render still perform the backend save
 - resizable workspaces for stimulus controls, trajectory preview, protocol assembly, participant order previews, and runner readiness/review panes
 - repeatable settings save/load
 - JSON design save/load and Save As
