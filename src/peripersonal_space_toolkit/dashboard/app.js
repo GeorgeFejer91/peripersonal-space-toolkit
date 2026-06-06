@@ -177,27 +177,12 @@ function renderStudy() {
 function renderProfileSummary() {
   const selectedId = $("template-select").value;
   const current = state.templates.find((item) => item.template_id === selectedId);
-  const loaded = Boolean(current && current.template_id === state.selected_template);
-  const lines = [];
-  if (current) {
-    lines.push(`<div><strong>${loaded ? "Loaded profile" : "Selected preload"}:</strong> ${escapeHtml(current.citation_label)}</div>`);
-    if (current.doi) {
-      const href = doiUrl(current.doi);
-      lines.push(
-        `<div><strong>DOI URL:</strong> <a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a></div>`
-      );
-    } else if (current.source_url) {
-      lines.push(
-        `<div><strong>Source:</strong> <a href="${escapeAttr(current.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(current.source_url)}</a></div>`
-      );
-    }
-    if (!loaded) lines.push("<div>Pending load.</div>");
-    if (current.notes) lines.push(`<div>${escapeHtml(current.notes)}</div>`);
-  } else {
-    lines.push("<div>Custom design selected.</div>");
-    lines.push("<div>Define the trajectory, timing, audio, trial assembly, and session settings manually.</div>");
-  }
-  $("profile-summary").innerHTML = lines.join("");
+  const href = current?.doi ? doiUrl(current.doi) : "";
+  const summary = $("profile-summary");
+  summary.hidden = !href;
+  summary.innerHTML = href
+    ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a>`
+    : "";
 }
 
 function renderStimulus() {
