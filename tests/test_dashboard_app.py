@@ -147,6 +147,10 @@ def test_dashboard_static_assets_are_packaged():
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js
+    assert "fit2DCameraToRadius" in viewer_js
+    assert "TWO_D_RADIUS_PADDING" in viewer_js
+    assert "two_d_radius_centered" in viewer_js
+    assert "twoDFitVerticalSpanM" in viewer_js
     assert "/api/" not in html
 
 

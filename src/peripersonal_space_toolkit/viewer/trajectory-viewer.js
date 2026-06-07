@@ -30,9 +30,16 @@ controls.update();
 
 let currentViewMode = "3d";
 let currentRadius = 1.1;
+let lastViewportWidth = 0;
+let lastViewportHeight = 0;
+let lastTwoDCameraDistance = 0;
+let lastTwoDVerticalSpan = 0;
+let lastTwoDFitAspect = 1;
 const HEAD_CENTER_Y = 1.33;
 const DISTANCE_CM_MIN = 1;
 const DISTANCE_CM_MAX = 1000;
+const TWO_D_RADIUS_PADDING = 1.08;
+const TWO_D_MIN_WORLD_SPAN = 0.5;
 const START_MARKER_COLOR = 0x4ecb71;
 const END_MARKER_COLOR = 0xe0524d;
 const ENDPOINT_2D_LIFT_M = 0.07;
@@ -43,18 +50,33 @@ const dragPoint = new THREE.Vector3();
 const dragHandles = new Map();
 let activeDragHandle = "";
 
+function fit2DCameraToRadius() {
+  const aspect = Math.max(0.1, camera.aspect || 1);
+  const radiusSpan = Math.max(currentRadius * 2 * TWO_D_RADIUS_PADDING, TWO_D_MIN_WORLD_SPAN);
+  const verticalSpan = aspect < 1 ? radiusSpan / aspect : radiusSpan;
+  const distance = verticalSpan / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  lastTwoDCameraDistance = distance;
+  lastTwoDVerticalSpan = verticalSpan;
+  lastTwoDFitAspect = aspect;
+  controls.target.set(0, 0, 0);
+  camera.position.set(0, distance, 0);
+  camera.lookAt(controls.target);
+  camera.updateProjectionMatrix();
+  controls.minDistance = distance;
+  controls.maxDistance = distance;
+  controls.update();
+}
+
 function applyCameraMode(mode, resetCamera = false) {
   if (mode === "2d") {
     camera.up.set(0, 0, -1);
     controls.target.set(0, 0, 0);
     controls.enableRotate = false;
-    controls.enableZoom = true;
+    controls.enableZoom = false;
     controls.enablePan = false;
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = 0;
-    if (resetCamera) {
-      camera.position.set(0, Math.max(2.4, currentRadius * 3.2), 0);
-    }
+    fit2DCameraToRadius();
   } else {
     camera.up.set(0, 1, 0);
     controls.target.set(0, 0, 0);
@@ -376,6 +398,10 @@ function drawScene(payload) {
     drag_handles: [...dragHandles.keys()].sort(),
     start_marker_color: "#4ecb71",
     end_marker_color: "#e0524d",
+    two_d_radius_centered: is2D,
+    two_d_fit_vertical_span_m: is2D ? lastTwoDVerticalSpan.toFixed(3) : "",
+    two_d_camera_distance_m: is2D ? lastTwoDCameraDistance.toFixed(3) : "",
+    two_d_fit_aspect: is2D ? lastTwoDFitAspect.toFixed(3) : "",
     start_distance_cm: payload.controls?.start_distance_cm ?? "",
     end_distance_cm: payload.controls?.end_distance_cm ?? "",
     start_rotation_deg: payload.controls?.start_rotation_deg ?? "",
@@ -391,6 +417,10 @@ function drawScene(payload) {
   container.dataset.dragHandles = window.__trajectoryViewerState.drag_handles.join(",");
   container.dataset.startMarkerColor = window.__trajectoryViewerState.start_marker_color;
   container.dataset.endMarkerColor = window.__trajectoryViewerState.end_marker_color;
+  container.dataset.twoDRadiusCentered = String(window.__trajectoryViewerState.two_d_radius_centered);
+  container.dataset.twoDFitVerticalSpanM = window.__trajectoryViewerState.two_d_fit_vertical_span_m;
+  container.dataset.twoDCameraDistanceM = window.__trajectoryViewerState.two_d_camera_distance_m;
+  container.dataset.twoDFitAspect = window.__trajectoryViewerState.two_d_fit_aspect;
   container.dataset.startDistanceCm = String(window.__trajectoryViewerState.start_distance_cm);
   container.dataset.endDistanceCm = String(window.__trajectoryViewerState.end_distance_cm);
   container.dataset.startRotationDeg = String(window.__trajectoryViewerState.start_rotation_deg);
@@ -432,9 +462,16 @@ function handlePointerUp(event) {
 function resize() {
   const width = Math.max(1, container.clientWidth);
   const height = Math.max(1, container.clientHeight);
+  if (width === lastViewportWidth && height === lastViewportHeight) return;
+  lastViewportWidth = width;
+  lastViewportHeight = height;
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
-  camera.updateProjectionMatrix();
+  if (currentViewMode === "2d") {
+    fit2DCameraToRadius();
+  } else {
+    camera.updateProjectionMatrix();
+  }
 }
 
 function animate() {
