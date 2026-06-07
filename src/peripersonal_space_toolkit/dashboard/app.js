@@ -58,6 +58,7 @@ const $ = (id) => document.getElementById(id);
 let apiBase = "";
 let templateLoadInFlight = false;
 let pendingAudioImportMode = "preserve";
+let pendingBakeRecipe = null;
 
 async function api(path, options = {}) {
   let response;
@@ -220,6 +221,7 @@ function renderStimulus() {
   $("end-hold").value = controls.end_hold_s ?? 0.5;
   syncPreviewModeControls($("preview-mode").value || "2d");
   renderGeneratedNoiseSelect();
+  renderBakePanel();
   renderNoiseTable();
   renderAudioTable();
   refreshAssemblyTargetOptions();
@@ -229,7 +231,7 @@ function renderStimulus() {
 function renderGeneratedNoiseSelect() {
   const select = $("generated-noise-select");
   const current = select.value;
-  select.innerHTML = '<option value="">Add generated noise...</option>';
+  select.innerHTML = '<option value="">Choose noise to bake...</option>';
   for (const item of PROCEDURAL_NOISE_TYPES) {
     const option = document.createElement("option");
     option.value = item.value;
@@ -239,17 +241,40 @@ function renderGeneratedNoiseSelect() {
   select.value = PROCEDURAL_NOISE_TYPES.some((item) => item.value === current) ? current : "";
 }
 
+function renderBakePanel() {
+  const status = $("bake-status");
+  const button = $("bake-stimulus");
+  if (!status || !button) return;
+  if (!pendingBakeRecipe) {
+    status.textContent = "No source staged";
+    status.className = "status-label required";
+    button.disabled = true;
+    return;
+  }
+  const label = pendingBakeRecipe.label || pendingBakeRecipe.audio?.label || noiseTypeLabel(pendingBakeRecipe.noise_type);
+  $("bake-label").value = label || "";
+  $("bake-gain").value = Number(pendingBakeRecipe.gain || pendingBakeRecipe.audio?.gain || 1);
+  const kind = pendingBakeRecipe.kind === "imported_audio" ? audioRoleTitle(pendingBakeRecipe.render_mode) : `${noiseTypeLabel(pendingBakeRecipe.noise_type)} noise`;
+  status.textContent = `Staged: ${kind}`;
+  status.className = "status-label ready";
+  button.disabled = false;
+}
+
 function renderNoiseTable() {
   const list = $("noise-list");
   list.innerHTML = "";
   for (const noise of state.design.noises || []) {
     const selectedNoise = String(noise.noise_type || "pink").toLowerCase();
+    const wav = renderedWavForLabel(noise.label || `${noiseTypeLabel(selectedNoise)} noise`);
     const card = document.createElement("div");
     card.className = "source-card noise-source-card";
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(noiseTypeLabel(selectedNoise))} noise</strong>
-        <button type="button" data-remove-noise>Remove</button>
+        <div class="source-card-actions">
+          ${sourceFolderAction(wav?.path)}
+          <button type="button" data-remove-noise>Remove</button>
+        </div>
       </div>
       <div class="source-card-fields">
         <div class="field-row">
@@ -306,7 +331,10 @@ function renderAudioTable() {
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(audioRoleTitle(role))}</strong>
-        <button type="button" data-remove-audio>Remove</button>
+        <div class="source-card-actions">
+          ${sourceFolderAction(audio.path)}
+          <button type="button" data-remove-audio>Remove</button>
+        </div>
       </div>
       <div class="source-card-fields audio-source-fields">
         <div class="field-row">
@@ -359,13 +387,41 @@ function renderAudioTable() {
   }
 }
 
+function sourceFolderAction(path) {
+  if (!path) return "";
+  return `<button type="button" class="source-folder-link" data-open-folder="${escapeAttr(path)}">Open Folder</button>`;
+}
+
+function renderedWavForLabel(label) {
+  const target = normalizeSourceKey(label);
+  if (!target) return null;
+  return (state.render?.wavs || []).find((wav) => {
+    const keys = [
+      wav.label,
+      wav.path,
+      String(wav.path || "").split(/[\\/]/).pop(),
+      String(wav.path || "").split(/[\\/]/).pop()?.replace(/^looming_/i, "").replace(/\.[^.]+$/, ""),
+    ];
+    return keys.some((key) => normalizeSourceKey(key) === target);
+  }) || null;
+}
+
+function normalizeSourceKey(value) {
+  return String(value || "")
+    .replace(/^looming[_\s-]*/i, "")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function renderSourceCounts() {
   const generated = $("noise-list").querySelectorAll(".noise-source-card").length;
   const audioCards = [...$("audio-list").querySelectorAll(".audio-source-card")];
   const imported = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
   const prestimulus = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
   const stimulusSources = generated + imported;
-  const sourceLabel = `${stimulusSources} source${stimulusSources === 1 ? "" : "s"}`;
+  const sourceLabel = `${stimulusSources} baked source${stimulusSources === 1 ? "" : "s"}`;
   const snippetLabel = prestimulus ? ` + ${prestimulus} snippet${prestimulus === 1 ? "" : "s"}` : "";
   $("source-counts").textContent = `${sourceLabel}${snippetLabel}`;
   $("source-counts").className = `status-label ${stimulusSources ? "ready" : "required"}`;
@@ -452,8 +508,7 @@ function renderTrials() {
   $("blocks").value = protocol.blocks ?? 1;
   $("catch-percent").value = protocol.catch_trial_percentage ?? 0;
   $("soa-values").value = formatList(protocol.soa_values_ms);
-  $("spatial-values").value = formatList(protocol.spatial_values_cm);
-  $("pair-spatial").checked = Boolean(protocol.pair_spatial_values_with_soas);
+  renderTrialStrips();
 
   const summary = $("protocol-summary");
   summary.innerHTML = "";
@@ -463,6 +518,262 @@ function renderTrials() {
     item.innerHTML = `<span>${humanize(key)}</span><strong>${value}</strong>`;
     summary.appendChild(item);
   }
+}
+
+function renderTrialStrips() {
+  const list = $("filmstrip-list");
+  if (!list) return;
+  const strips = state.design.protocol?.trial_strips || [];
+  list.innerHTML = "";
+  if (!strips.length) {
+    list.innerHTML = `<div class="filmstrip-empty">No filmstrip rows.</div>`;
+    return;
+  }
+  strips.forEach((strip, index) => list.appendChild(renderTrialStripRow(strip, index)));
+  updateFilmstripCounts();
+}
+
+function renderTrialStripRow(strip, index) {
+  const row = document.createElement("div");
+  row.className = "filmstrip-row";
+  row.dataset.stripIndex = String(index);
+  row.innerHTML = `
+    <div class="filmstrip-row-header">
+      <div class="field-row">
+        <label>Row label</label>
+        <input data-strip-field="label" value="${escapeAttr(strip.label || `Row ${index + 1}`)}">
+      </div>
+      <div class="filmstrip-row-actions">
+        <span class="filmstrip-count" data-strip-count></span>
+        <button type="button" data-strip-move="up">Up</button>
+        <button type="button" data-strip-move="down">Down</button>
+        <button type="button" data-add-strip-element="fixed_audio">Add Clip</button>
+        <button type="button" data-add-strip-element="looming_stimulus">Add Looming Stimulus</button>
+        <button type="button" data-remove-strip>Remove Row</button>
+      </div>
+    </div>
+    <div class="filmstrip-sequence"></div>
+  `;
+  const sequence = row.querySelector(".filmstrip-sequence");
+  for (const [elementIndex, element] of (strip.elements || []).entries()) {
+    sequence.appendChild(renderTrialStripElement(element, elementIndex));
+  }
+  return row;
+}
+
+function renderTrialStripElement(element, index) {
+  const sourceType = element.kind === "fixed_audio" ? "fixed_audio" : "looming_stimulus";
+  const card = document.createElement("div");
+  card.className = `filmstrip-element ${sourceType.replace("_", "-")} ${filmstripNoiseClass(element)}`;
+  card.dataset.elementIndex = String(index);
+  card.dataset.elementKind = sourceType;
+  const title = sourceType === "fixed_audio" ? "Fixed audio clip" : "Looming Stimulus";
+  const sourceControl = sourceType === "fixed_audio"
+    ? `<select data-element-field="source_label">${fixedAudioOptions(element.source_label || "")}</select>`
+    : `<select data-element-field="source_labels" multiple>${loomingSourceOptions(element.source_labels || [])}</select>`;
+  card.innerHTML = `
+    <div class="filmstrip-element-heading">
+      <span>${title}</span>
+      <button type="button" data-remove-strip-element>Remove</button>
+    </div>
+    <div class="field-row">
+      <label>Label</label>
+      <input data-element-field="label" value="${escapeAttr(element.label || title)}">
+    </div>
+    <div class="field-row">
+      <label>Source</label>
+      ${sourceControl}
+    </div>
+    <div class="field-row inline-check">
+      <input data-element-field="randomized" type="checkbox" ${element.randomized ? "checked" : ""}>
+      <label>Randomized</label>
+    </div>
+  `;
+  return card;
+}
+
+function filmstripNoiseClass(element) {
+  const labels = element.source_labels || [];
+  const firstLabel = labels[0] || element.source_label || "";
+  const source = stimulusSourceDetailsFromDom().find((item) => item.label === firstLabel);
+  return source?.noise_type ? `noise-${String(source.noise_type).toLowerCase()}` : "";
+}
+
+function fixedAudioOptions(selected = "") {
+  const options = [{ value: "", label: "Select clip" }];
+  for (const item of fixedAudioSourceOptions()) options.push(item);
+  return renderOptionList(options, selected);
+}
+
+function loomingSourceOptions(selected = []) {
+  const selectedSet = new Set(selected || []);
+  return stimulusSourceDetailsFromDom()
+    .map((item) => `<option value="${escapeAttr(item.label)}" ${selectedSet.has(item.label) ? "selected" : ""}>${escapeHtml(item.label)}</option>`)
+    .join("");
+}
+
+function fixedAudioSourceOptions() {
+  const options = [];
+  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+    const role = card.querySelector('[data-field="audio_role"]')?.value;
+    if (role !== "prestimulus") continue;
+    const label = card.querySelector('[data-field="label"]')?.value.trim();
+    if (label) options.push({ value: label, label });
+  }
+  return options;
+}
+
+function stimulusSourceDetailsFromDom() {
+  const sources = [];
+  for (const card of $("noise-list").querySelectorAll(".noise-source-card")) {
+    const label = card.querySelector('[data-field="label"]')?.value.trim() || "Generated noise";
+    sources.push({
+      label,
+      noise_type: card.querySelector('[data-field="noise_type"]')?.value || "pink",
+    });
+  }
+  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+    const role = card.querySelector('[data-field="audio_role"]')?.value;
+    if (role === "prestimulus") continue;
+    const label = card.querySelector('[data-field="label"]')?.value.trim() || audioRoleTitle(role);
+    sources.push({ label, noise_type: "custom_audio" });
+  }
+  return sources;
+}
+
+function collectTrialStrips() {
+  const strips = [];
+  for (const [stripIndex, row] of [...$("filmstrip-list").querySelectorAll(".filmstrip-row")].entries()) {
+    const label = row.querySelector('[data-strip-field="label"]')?.value.trim() || `Row ${stripIndex + 1}`;
+    const elements = [];
+    for (const [elementIndex, card] of [...row.querySelectorAll(".filmstrip-element")].entries()) {
+      const kind = card.dataset.elementKind === "fixed_audio" ? "fixed_audio" : "looming_stimulus";
+      const item = {
+        element_id: `row-${stripIndex + 1}-element-${elementIndex + 1}`,
+        kind,
+        label: card.querySelector('[data-element-field="label"]')?.value.trim() || (kind === "fixed_audio" ? "Fixed audio clip" : "Looming Stimulus"),
+        source_label: "",
+        source_labels: [],
+        randomized: Boolean(card.querySelector('[data-element-field="randomized"]')?.checked),
+      };
+      if (kind === "fixed_audio") {
+        item.source_label = card.querySelector('[data-element-field="source_label"]')?.value || "";
+      } else {
+        item.source_labels = [...card.querySelectorAll('[data-element-field="source_labels"] option:checked')].map((option) => option.value);
+      }
+      elements.push(item);
+    }
+    strips.push({
+      strip_id: `strip-${stripIndex + 1}`,
+      label,
+      elements,
+    });
+  }
+  return strips;
+}
+
+function updateFilmstripCounts() {
+  const soaCount = parseIntegerList($("soa-values").value).length;
+  const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
+  for (const row of $("filmstrip-list").querySelectorAll(".filmstrip-row")) {
+    const count = row.querySelector("[data-strip-count]");
+    const slot = row.querySelector('.filmstrip-element[data-element-kind="looming_stimulus"]');
+    const selected = slot ? slot.querySelectorAll('[data-element-field="source_labels"] option:checked').length : 0;
+    const sourceCount = selected || stimulusSourceDetailsFromDom().length;
+    const total = sourceCount * Math.max(soaCount, 0) * repetitions;
+    count.textContent = `${sourceCount} stimuli x ${soaCount} SOAs x ${repetitions} reps = ${total} trials/block`;
+  }
+}
+
+function setTrialStrips(strips) {
+  state.design.protocol = state.design.protocol || {};
+  state.design.protocol.trial_strips = strips;
+  renderTrialStrips();
+}
+
+function addFilmstripRow() {
+  const strips = collectTrialStrips();
+  strips.push({
+    strip_id: `strip-${strips.length + 1}`,
+    label: `Row ${strips.length + 1}`,
+    elements: [defaultFilmstripElement("looming_stimulus")],
+  });
+  setTrialStrips(strips);
+}
+
+function defaultFilmstripElement(kind) {
+  if (kind === "fixed_audio") {
+    const firstClip = fixedAudioSourceOptions()[0]?.value || "";
+    return {
+      element_id: "",
+      kind: "fixed_audio",
+      label: firstClip || "Fixed audio clip",
+      source_label: firstClip,
+      source_labels: [],
+      randomized: false,
+    };
+  }
+  return {
+    element_id: "",
+    kind: "looming_stimulus",
+    label: "Looming Stimulus",
+    source_label: "",
+    source_labels: [],
+    randomized: true,
+  };
+}
+
+function addFilmstripElement(button, kind) {
+  const row = button.closest(".filmstrip-row");
+  const stripIndex = Number(row?.dataset.stripIndex || -1);
+  const strips = collectTrialStrips();
+  if (!strips[stripIndex]) return;
+  strips[stripIndex].elements.push(defaultFilmstripElement(kind));
+  setTrialStrips(strips);
+}
+
+function removeFilmstripRow(button) {
+  const row = button.closest(".filmstrip-row");
+  const stripIndex = Number(row?.dataset.stripIndex || -1);
+  const strips = collectTrialStrips();
+  if (stripIndex < 0) return;
+  strips.splice(stripIndex, 1);
+  setTrialStrips(strips);
+}
+
+function moveFilmstripRow(button, direction) {
+  const row = button.closest(".filmstrip-row");
+  const stripIndex = Number(row?.dataset.stripIndex || -1);
+  const targetIndex = direction === "up" ? stripIndex - 1 : stripIndex + 1;
+  const strips = collectTrialStrips();
+  if (!strips[stripIndex] || !strips[targetIndex]) return;
+  const [item] = strips.splice(stripIndex, 1);
+  strips.splice(targetIndex, 0, item);
+  setTrialStrips(strips);
+}
+
+function removeFilmstripElement(button) {
+  const row = button.closest(".filmstrip-row");
+  const card = button.closest(".filmstrip-element");
+  const stripIndex = Number(row?.dataset.stripIndex || -1);
+  const elementIndex = Number(card?.dataset.elementIndex || -1);
+  const strips = collectTrialStrips();
+  if (!strips[stripIndex] || elementIndex < 0) return;
+  strips[stripIndex].elements.splice(elementIndex, 1);
+  setTrialStrips(strips);
+}
+
+function syncFilmstripSourceOptions() {
+  for (const select of document.querySelectorAll('[data-element-field="source_label"]')) {
+    const selected = select.value;
+    select.innerHTML = fixedAudioOptions(selected);
+    select.value = [...select.options].some((option) => option.value === selected) ? selected : "";
+  }
+  for (const select of document.querySelectorAll('[data-element-field="source_labels"]')) {
+    const selected = [...select.selectedOptions].map((option) => option.value);
+    select.innerHTML = loomingSourceOptions(selected);
+  }
+  updateFilmstripCounts();
 }
 
 function renderRun() {
@@ -580,7 +891,7 @@ function renderReview() {
 function renderPreviewTables() {
   const trialRows = state.trial_preview || [];
   $("trial-count").textContent = `${trialRows.length} shown`;
-  fillTable("trial-table", trialRows, ["block", "trial", "type", "phase", "soa_ms", "space_cm", "tactile_site", "noise"]);
+  fillTable("trial-table", trialRows, ["block", "trial", "type", "phase", "soa_ms", "space_cm", "tactile_site", "sequence"]);
 
   const orderRows = state.participant_orders || [];
   $("order-count").textContent = `${orderRows.length} shown`;
@@ -617,15 +928,20 @@ function collectPayload() {
   const audio = collectAudioFiles();
   design.custom_looming_files = audio.looming;
   design.prestimulus_files = audio.prestimulus;
+  const trialStrips = collectTrialStrips();
+  const legacySpatial = design.protocol?.spatial_values_cm?.length
+    ? design.protocol.spatial_values_cm
+    : [numberValue("end-distance", 10)];
   design.protocol = {
     ...(design.protocol || {}),
     repetitions_per_condition: Math.max(1, Math.round(numberValue("repetitions", 1))),
     soa_values_ms: parseIntegerList($("soa-values").value),
-    spatial_values_cm: parseNumberList($("spatial-values").value),
-    pair_spatial_values_with_soas: $("pair-spatial").checked,
+    spatial_values_cm: legacySpatial,
+    pair_spatial_values_with_soas: false,
     catch_trial_percentage: numberValue("catch-percent", 0),
     blocks: Math.max(1, Math.round(numberValue("blocks", 1))),
-    participants: Math.max(1, Math.round(numberValue("participants", 1)))
+    participants: Math.max(1, Math.round(numberValue("participants", 1))),
+    trial_strips: trialStrips
   };
   return {
     participant_id: $("participant-id").value.trim() || (state.custom_workflow?.is_custom ? "" : "P001"),
@@ -739,6 +1055,32 @@ async function startRender() {
   await loadState();
 }
 
+async function startBakeStimulus() {
+  const recipe = collectBakeRecipe();
+  if (!recipe) {
+    showToast("Choose a noise or local audio source first");
+    return;
+  }
+  const payload = collectPayload();
+  payload.bake_recipe = recipe;
+  const job = await api("/api/stimulus/bake", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  showToast("Stimulus bake started");
+  pollJob(job.job_id);
+  await loadState();
+}
+
+async function openLocalFolder(path) {
+  if (!path) return;
+  await api("/api/local/open-folder", {
+    method: "POST",
+    body: JSON.stringify({ path })
+  });
+  showToast("Opened local folder");
+}
+
 async function prepareSession() {
   if (!ensureWorkflowAction("ready_to_prepare")) return;
   state = await api("/api/session/prepare", {
@@ -775,6 +1117,11 @@ async function pollJob(jobId) {
     await loadState();
     if (job.status === "succeeded" || job.status === "failed") {
       activePolls.delete(jobId);
+      if (job.status === "succeeded" && job.kind === "stimulus_bake") {
+        pendingBakeRecipe = null;
+        $("generated-noise-select").value = "";
+        renderBakePanel();
+      }
       showToast(`${humanize(job.kind)} ${job.status}`);
       break;
     }
@@ -1080,6 +1427,48 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, value));
 }
 
+function stageGeneratedNoise(noiseType = "pink") {
+  const type = PROCEDURAL_NOISE_TYPES.some((item) => item.value === noiseType) ? noiseType : "pink";
+  const label = `${noiseTypeLabel(type)} noise`;
+  pendingBakeRecipe = {
+    kind: "generated_noise",
+    noise_type: type,
+    label,
+    gain: Number($("bake-gain")?.value || 1)
+  };
+  $("bake-label").value = label;
+  renderBakePanel();
+  showToast(`${noiseTypeLabel(type)} noise staged`);
+}
+
+function stageImportedAudioForBake(audio, renderMode) {
+  const mode = renderMode === "spatialize" ? "spatialize" : "preserve";
+  pendingBakeRecipe = {
+    kind: "imported_audio",
+    render_mode: mode,
+    label: audio.label || (mode === "spatialize" ? "Dry custom tone" : "Already looming / control"),
+    audio,
+    gain: Number(audio.gain || 1)
+  };
+  $("bake-label").value = pendingBakeRecipe.label;
+  renderBakePanel();
+}
+
+function collectBakeRecipe() {
+  if (!pendingBakeRecipe) return null;
+  const recipe = clone(pendingBakeRecipe);
+  recipe.label = $("bake-label").value.trim() || recipe.label || "Baked stimulus";
+  recipe.gain = Math.max(0.01, Number($("bake-gain").value || recipe.gain || 1));
+  if (recipe.audio) {
+    recipe.audio = {
+      ...recipe.audio,
+      label: recipe.label,
+      gain: recipe.gain
+    };
+  }
+  return recipe;
+}
+
 function addNoiseRow(noiseType = "pink") {
   const type = PROCEDURAL_NOISE_TYPES.some((item) => item.value === noiseType) ? noiseType : "pink";
   state.design.noises = state.design.noises || [];
@@ -1093,6 +1482,7 @@ function addNoiseRow(noiseType = "pink") {
   });
   renderNoiseTable();
   refreshAssemblyTargetOptions();
+  syncFilmstripSourceOptions();
   renderSourceCounts();
 }
 
@@ -1133,14 +1523,15 @@ async function importAudioFromPicker() {
   if (pendingAudioImportMode === "prestimulus") {
     state.design.prestimulus_files = state.design.prestimulus_files || [];
     state.design.prestimulus_files.push({ ...imported.audio, placement: "before", target_source_label: "", phase: "", gap_s: 0 });
+    renderAudioTable();
+    refreshAssemblyTargetOptions();
+    syncFilmstripSourceOptions();
+    renderSourceCounts();
+    showToast("Instruction snippet imported locally");
   } else {
-    state.design.custom_looming_files = state.design.custom_looming_files || [];
-    state.design.custom_looming_files.push(imported.audio);
+    stageImportedAudioForBake(imported.audio, pendingAudioImportMode);
+    showToast("Audio staged for baking");
   }
-  renderAudioTable();
-  refreshAssemblyTargetOptions();
-  renderSourceCounts();
-  showToast(pendingAudioImportMode === "prestimulus" ? "Instruction snippet imported locally" : "Audio imported locally");
 }
 
 function fileToBase64(file) {
@@ -1159,6 +1550,7 @@ function removeSourceCard(button) {
   const card = button.closest(".source-card");
   if (card) card.remove();
   refreshAssemblyTargetOptions();
+  syncFilmstripSourceOptions();
   renderSourceCounts();
 }
 
@@ -1212,19 +1604,28 @@ function wireEvents() {
     loadTemplate().catch(reportError);
   });
   $("render-action").addEventListener("click", () => startRender().catch(reportError));
+  $("bake-stimulus").addEventListener("click", () => startBakeStimulus().catch(reportError));
   $("prepare-action").addEventListener("click", () => prepareSession().catch(reportError));
   $("stress-action").addEventListener("click", () => stressAudio().catch(reportError));
   $("focus-action").addEventListener("click", () => startFocus().catch(reportError));
   $("generated-noise-select").addEventListener("change", () => {
     const selectedNoise = $("generated-noise-select").value;
     if (!selectedNoise) return;
-    addNoiseRow(selectedNoise);
-    $("generated-noise-select").value = "";
+    stageGeneratedNoise(selectedNoise);
+  });
+  $("bake-label").addEventListener("input", () => {
+    if (pendingBakeRecipe) pendingBakeRecipe.label = $("bake-label").value.trim();
+  });
+  $("bake-gain").addEventListener("input", () => {
+    if (pendingBakeRecipe) pendingBakeRecipe.gain = Math.max(0.01, Number($("bake-gain").value || 1));
   });
   $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
   $("import-audio-preserve").addEventListener("click", () => openAudioPicker("preserve"));
   $("import-audio-prestimulus").addEventListener("click", () => openAudioPicker("prestimulus"));
   $("audio-file-input").addEventListener("change", () => importAudioFromPicker().catch(reportError));
+  $("add-strip-row").addEventListener("click", () => addFilmstripRow());
+  $("soa-values").addEventListener("input", updateFilmstripCounts);
+  $("repetitions").addEventListener("input", updateFilmstripCounts);
   $("reset-camera").addEventListener("click", () => {
     const frame = $("trajectory-frame");
     if (frame.contentWindow.resetTrajectoryCamera) frame.contentWindow.resetTrajectoryCamera();
@@ -1266,15 +1667,35 @@ function wireEvents() {
     updateViewer();
   });
   document.addEventListener("click", (event) => {
+    if (event.target.matches("[data-open-folder]")) {
+      openLocalFolder(event.target.dataset.openFolder).catch(reportError);
+      return;
+    }
     if (event.target.matches("[data-remove-noise], [data-remove-audio]")) {
       removeSourceCard(event.target);
+    }
+    if (event.target.matches("[data-remove-strip]")) {
+      removeFilmstripRow(event.target);
+    }
+    if (event.target.matches("[data-remove-strip-element]")) {
+      removeFilmstripElement(event.target);
+    }
+    if (event.target.matches("[data-add-strip-element]")) {
+      addFilmstripElement(event.target, event.target.dataset.addStripElement);
+    }
+    if (event.target.matches("[data-strip-move]")) {
+      moveFilmstripRow(event.target, event.target.dataset.stripMove);
     }
   });
   document.addEventListener("input", (event) => {
     const card = event.target.closest?.(".source-card");
-    if (!card) return;
-    if (event.target.matches('[data-field="label"]')) {
+    if (card && event.target.matches('[data-field="label"]')) {
       refreshAssemblyTargetOptions();
+      syncFilmstripSourceOptions();
+    }
+    if (event.target.closest?.(".filmstrip-row")) {
+      state.design.protocol.trial_strips = collectTrialStrips();
+      updateFilmstripCounts();
     }
   });
   document.addEventListener("change", (event) => {
@@ -1284,12 +1705,18 @@ function wireEvents() {
       if (card) card.dataset.audioRole = event.target.value;
       if (title) title.textContent = audioRoleTitle(event.target.value);
       refreshAssemblyTargetOptions();
+      syncFilmstripSourceOptions();
       renderSourceCounts();
     }
     if (event.target.matches('.noise-source-card [data-field="noise_type"]')) {
       const card = event.target.closest(".noise-source-card");
       const title = card?.querySelector(".source-card-heading strong");
       if (title) title.textContent = `${noiseTypeLabel(event.target.value)} noise`;
+      syncFilmstripSourceOptions();
+    }
+    if (event.target.closest?.(".filmstrip-row")) {
+      state.design.protocol.trial_strips = collectTrialStrips();
+      updateFilmstripCounts();
     }
   });
 }

@@ -117,7 +117,7 @@
                 <div class="source-action source-picker-card">
                   <label for="generated-noise-select">Generated noise</label>
                   <select id="generated-noise-select">
-                    <option value="">Add generated noise...</option>
+                    <option value="">Choose noise to bake...</option>
                   </select>
                 </div>
                 <button id="import-audio-spatialize" type="button" class="source-action">
@@ -133,15 +133,27 @@
                   <span>Attach before/after stimulus</span>
                 </button>
               </div>
+              <div class="bake-panel">
+                <div class="field-row">
+                  <label for="bake-label">Bake label</label>
+                  <input id="bake-label" type="text" autocomplete="off">
+                </div>
+                <div class="field-row">
+                  <label for="bake-gain">Gain</label>
+                  <input id="bake-gain" type="number" min="0.01" step="0.05" value="1">
+                </div>
+                <button id="bake-stimulus" type="button" class="primary">Bake Stimulus</button>
+                <span id="bake-status" class="status-label required">No source staged</span>
+              </div>
             </div>
 
             <div class="table-toolbar">
-              <span>Generated noise sources</span>
+              <span>Baked generated stimuli</span>
             </div>
             <div class="source-card-list" id="noise-list"></div>
 
             <div class="table-toolbar">
-              <span>Custom local audio sources</span>
+              <span>Baked local stimuli and instruction snippets</span>
             </div>
             <input id="audio-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/mpeg,audio/mp3" hidden>
             <div class="source-card-list" id="audio-list"></div>
@@ -161,10 +173,6 @@
                 <input id="repetitions" type="number" min="1" max="100" step="1">
               </div>
               <div class="field-row">
-                <label for="participants">Participants</label>
-                <input id="participants" type="number" min="1" max="500" step="1">
-              </div>
-              <div class="field-row">
                 <label for="blocks">Blocks</label>
                 <input id="blocks" type="number" min="1" max="100" step="1">
               </div>
@@ -172,18 +180,21 @@
                 <label for="catch-percent">Catch percent</label>
                 <input id="catch-percent" type="number" min="0" max="100" step="1">
               </div>
+              <div class="field-row">
+                <label for="participants">Participants</label>
+                <input id="participants" type="number" min="1" max="500" step="1">
+              </div>
             </div>
             <div class="field-row">
               <label for="soa-values">SOA values ms</label>
               <input id="soa-values" type="text" autocomplete="off">
             </div>
-            <div class="field-row">
-              <label for="spatial-values">Spatial values cm</label>
-              <input id="spatial-values" type="text" autocomplete="off">
-            </div>
-            <div class="field-row inline-check">
-              <input id="pair-spatial" type="checkbox">
-              <label for="pair-spatial">Pair SOA and spatial values</label>
+            <div class="filmstrip-editor" aria-label="Trial filmstrip builder">
+              <div class="source-module-heading">
+                <span>Trial Filmstrip</span>
+                <button id="add-strip-row" type="button">Add Row</button>
+              </div>
+              <div id="filmstrip-list" class="filmstrip-list"></div>
             </div>
             <div id="protocol-summary" class="summary-grid"></div>
             <div class="step-footer">
@@ -258,7 +269,7 @@
                   <th>SOA</th>
                   <th>Space</th>
                   <th>Site</th>
-                  <th>Noise</th>
+                  <th>Sequence</th>
                 </tr>
               </thead>
               <tbody></tbody>

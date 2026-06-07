@@ -118,12 +118,18 @@ def rendered_wavs(render_dir: Path = DEFAULT_RENDER_DIR) -> list[RenderedWav]:
     manifest = _load_json(render_manifest_path(render_dir))
     outputs = manifest.get("wav_outputs", []) if isinstance(manifest, dict) else []
     wavs: list[RenderedWav] = []
+    seen_paths: set[Path] = set()
     for item in outputs:
         path = Path(str(item.get("path", "")))
         if not path.is_absolute():
             path = render_dir / path
-        if path.exists():
+        if path.exists() and path not in seen_paths:
             wavs.append(_wav_info(path, sha256=str(item.get("sha256", ""))))
+            seen_paths.add(path)
+    for path in render_dir.glob("*.wav"):
+        if path not in seen_paths:
+            wavs.append(_wav_info(path))
+            seen_paths.add(path)
     if wavs:
         return sorted(wavs, key=lambda item: item.label)
     return sorted((_wav_info(path) for path in render_dir.glob("*.wav")), key=lambda item: item.label)
@@ -573,6 +579,14 @@ def _write_block_manifest(path: Path, rows: list[dict[str, Any]], participant_id
         "Spatial_Value_cm",
         "Azimuth_deg",
         "Elevation_deg",
+        "Trial_Strip_ID",
+        "Trial_Strip_Label",
+        "Trial_Strip_Index",
+        "Tactile_Enabled",
+        "Sequence_Labels",
+        "Fixed_Audio_Labels",
+        "Fixed_Audio_Paths",
+        "Trial_Unit_Key",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -595,6 +609,14 @@ def _write_block_manifest(path: Path, rows: list[dict[str, Any]], participant_id
                     "Spatial_Value_cm": row.get("spatial_value_cm", ""),
                     "Azimuth_deg": row.get("azimuth_deg", ""),
                     "Elevation_deg": row.get("elevation_deg", ""),
+                    "Trial_Strip_ID": row.get("trial_strip_id", ""),
+                    "Trial_Strip_Label": row.get("trial_strip_label", ""),
+                    "Trial_Strip_Index": row.get("trial_strip_index", ""),
+                    "Tactile_Enabled": row.get("tactile_enabled", ""),
+                    "Sequence_Labels": row.get("sequence_labels", ""),
+                    "Fixed_Audio_Labels": row.get("fixed_audio_labels", ""),
+                    "Fixed_Audio_Paths": row.get("fixed_audio_paths", ""),
+                    "Trial_Unit_Key": row.get("trial_unit_key", ""),
                 }
             )
 

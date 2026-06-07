@@ -34,6 +34,7 @@ from .design import (
     default_design,
     design_from_dict,
     design_to_dict,
+    has_trial_strips,
     load_design,
     participant_block_orders,
     point_from_distance_rotation_height,
@@ -241,6 +242,62 @@ class DashboardController:
 
         return self.jobs.start("render", _render)
 
+    def start_bake_stimulus_job(self, payload: dict[str, Any]) -> DashboardJob:
+        recipe = dict(payload.get("bake_recipe") or {})
+        if not recipe:
+            raise ValueError("Choose a stimulus source before baking.")
+        design_payload = {key: value for key, value in payload.items() if key != "bake_recipe"}
+        if design_payload:
+            self.update_design(design_payload)
+        with self._lock:
+            design = _copy_design(self.design)
+        label = _unique_stimulus_label(_bake_recipe_label(recipe), design)
+        bake_design, source_kind, source_payload = _design_for_bake_recipe(design, recipe, label)
+        seed = int(design.protocol.random_seed or 20250604)
+        render_dir = self.render_dir
+
+        def _bake() -> dict[str, Any]:
+            render_dir.mkdir(parents=True, exist_ok=True)
+            design_path = render_dir / f"stimulus_design.bake_{_slug(label)}.json"
+            save_design(bake_design, design_path)
+            result = render_backend.render_design_with_3dti(design_path, render_dir, seed=seed)
+            wav_path = _baked_wav_path(result, label)
+            if wav_path is None or not wav_path.exists():
+                raise RuntimeError(f"Bake did not create a WAV for {label}.")
+
+            with self._lock:
+                if source_kind == "generated_noise":
+                    source = NoiseDefinition(**source_payload)
+                    self.design.noises.append(source)
+                    saved_source = asdict(source)
+                else:
+                    source = AudioFileSpec(
+                        label=label,
+                        path=str(wav_path),
+                        target_duration_s=float(source_payload.get("target_duration_s", design.trajectory.total_duration_s)),
+                        render_mode="preserve",
+                        gain=1.0,
+                        motion_mode="looming",
+                    )
+                    self.design.custom_looming_files.append(source)
+                    saved_source = asdict(source)
+                self.current_run_package = None
+                save_design(self.design, self.design_path)
+
+            return {
+                "status": result.status,
+                "exit_code": result.exit_code,
+                "source_kind": source_kind,
+                "source": saved_source,
+                "wav_path": str(wav_path),
+                "manifest_path": str(result.manifest_path),
+                "qc_path": str(result.qc_path),
+                "local_only": True,
+                "message": "Stimulus was baked by the local companion backend; no online upload was performed.",
+            }
+
+        return self.jobs.start("stimulus_bake", _bake)
+
     def prepare_session(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload:
             self.update_design(payload)
@@ -308,6 +365,41 @@ class DashboardController:
             "audio": asdict(audio),
             "local_only": True,
             "message": "Stored by the local companion backend; no online upload was performed.",
+        }
+
+    def open_local_folder(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_path = str(payload.get("path") or "").strip()
+        if not raw_path:
+            raise ValueError("No local path was provided.")
+        target = Path(raw_path).expanduser()
+        if not target.is_absolute():
+            target = REPO_ROOT / target
+        target = target.resolve()
+        allowed_roots = [
+            self.render_dir.resolve(),
+            self.import_dir.resolve(),
+            self.session_root.resolve(),
+            self.design_path.resolve().parent,
+        ]
+        if not any(target == root or root in target.parents for root in allowed_roots):
+            raise ValueError("Local folder opening is limited to dashboard-managed folders.")
+        folder = target if target.is_dir() else target.parent
+        if not folder.exists():
+            raise FileNotFoundError(f"Local folder does not exist: {folder}")
+        if sys.platform.startswith("win"):
+            if target.exists() and target.is_file():
+                subprocess.Popen(["explorer.exe", f"/select,{target}"])
+            else:
+                subprocess.Popen(["explorer.exe", str(folder)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+        return {
+            "local_only": True,
+            "path": str(target),
+            "folder": str(folder),
+            "message": "Opened by the local companion backend.",
         }
 
     def start_audio_stress_job(self) -> DashboardJob:
@@ -439,6 +531,14 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _job_to_dict(job)
 
+    @app.post("/api/stimulus/bake")
+    def api_bake_stimulus(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+        try:
+            job = controller.start_bake_stimulus_job(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _job_to_dict(job)
+
     @app.post("/api/session/prepare")
     def api_prepare(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
         try:
@@ -454,6 +554,13 @@ def create_app(
     def api_audio_import(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
         try:
             return controller.import_audio_source(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/local/open-folder")
+    def api_open_local_folder(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+        try:
+            return controller.open_local_folder(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -548,11 +655,11 @@ def _trial_preview_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 "block": row.get("block_label", ""),
                 "trial": row.get("block_trial_index", ""),
                 "type": row.get("trial_type", ""),
-                "phase": row.get("respiratory_phase", ""),
+                "phase": row.get("trial_strip_label", row.get("phase", "")),
                 "soa_ms": row.get("soa_ms", ""),
                 "space_cm": row.get("spatial_value_cm", ""),
                 "tactile_site": row.get("tactile_site", ""),
-                "noise": row.get("noise_label", row.get("noise_type", "")),
+                "sequence": row.get("sequence_labels") or row.get("noise_label", row.get("noise_type", "")),
             }
         )
     return rows
@@ -576,6 +683,86 @@ def _render_status(render_dir: Path) -> dict[str, Any]:
         "wav_count": len(wavs),
         "wavs": [_json_ready(asdict(wav)) for wav in wavs],
     }
+
+
+def _bake_recipe_label(recipe: dict[str, Any]) -> str:
+    label = str(recipe.get("label") or "").strip()
+    if label:
+        return label
+    if str(recipe.get("kind") or "") == "generated_noise":
+        return f"{str(recipe.get('noise_type') or 'pink').strip().title()} noise"
+    audio = recipe.get("audio") if isinstance(recipe.get("audio"), dict) else {}
+    return str(audio.get("label") or recipe.get("filename") or "Baked stimulus").strip() or "Baked stimulus"
+
+
+def _unique_stimulus_label(label: str, design: StimulusDesign) -> str:
+    base = str(label or "Baked stimulus").strip() or "Baked stimulus"
+    existing = {noise.label.strip().lower() for noise in design.noises}
+    existing.update(asset.label.strip().lower() for asset in design.custom_looming_files)
+    if base.lower() not in existing:
+        return base
+    index = 2
+    while f"{base} {index}".lower() in existing:
+        index += 1
+    return f"{base} {index}"
+
+
+def _design_for_bake_recipe(design: StimulusDesign, recipe: dict[str, Any], label: str) -> tuple[StimulusDesign, str, dict[str, Any]]:
+    bake_design = _copy_design(design)
+    bake_design.name = f"{design.name} - baked {label}"
+    bake_design.noises = []
+    bake_design.custom_looming_files = []
+    bake_design.prestimulus_files = []
+    kind = str(recipe.get("kind") or "generated_noise").strip().lower()
+    if kind == "generated_noise":
+        noise_type = str(recipe.get("noise_type") or "").strip().lower()
+        if noise_type not in SUPPORTED_NOISE_TYPES:
+            raise ValueError(f"Unsupported generated-noise type: {noise_type or 'missing'}")
+        source = {
+            "label": label,
+            "noise_type": noise_type,
+            "azimuth_deg": 0.0,
+            "elevation_deg": 0.0,
+            "gain": max(0.01, _float(recipe.get("gain"), 1.0)),
+            "motion_mode": "looming",
+        }
+        bake_design.noises = [NoiseDefinition(**source)]
+        return bake_design, "generated_noise", source
+
+    if kind == "imported_audio":
+        audio = recipe.get("audio") if isinstance(recipe.get("audio"), dict) else {}
+        path = str(audio.get("path") or recipe.get("path") or "").strip()
+        if not path or not Path(path).expanduser().exists():
+            raise ValueError("Imported audio must be stored locally before baking.")
+        render_mode = str(recipe.get("render_mode") or audio.get("render_mode") or "preserve").strip().lower()
+        if render_mode not in {"spatialize", "preserve"}:
+            render_mode = "preserve"
+        duration_s = max(0.1, _float(audio.get("target_duration_s") or recipe.get("target_duration_s"), design.trajectory.total_duration_s))
+        gain = max(0.01, _float(audio.get("gain") or recipe.get("gain"), 1.0))
+        bake_design.custom_looming_files = [
+            AudioFileSpec(
+                label=label,
+                path=path,
+                target_duration_s=duration_s,
+                render_mode=render_mode,
+                gain=gain,
+                motion_mode="looming",
+            )
+        ]
+        return bake_design, "imported_audio", {"target_duration_s": duration_s, "render_mode": render_mode}
+
+    raise ValueError(f"Unsupported bake recipe kind: {kind or 'missing'}")
+
+
+def _baked_wav_path(result: render_backend.RenderResult, label: str) -> Path | None:
+    if result.wav_paths:
+        label_slug = _slug(label).lower()
+        for path in result.wav_paths:
+            if label_slug in _slug(path.stem).lower():
+                return Path(path)
+        return Path(result.wav_paths[0])
+    candidate = result.output_dir / f"looming_{_slug(label)}.wav"
+    return candidate if candidate.exists() else None
 
 
 def _preflight_to_dict(preflight: Any) -> dict[str, Any]:
@@ -702,10 +889,8 @@ def _custom_trials_missing(design: StimulusDesign) -> list[str]:
         missing.append("Set planned participants to at least 1.")
     if not p.soa_values_ms:
         missing.append("Enter at least one SOA value.")
-    if not p.spatial_values_cm:
-        missing.append("Enter at least one spatial value.")
-    if p.pair_spatial_values_with_soas and len(p.soa_values_ms) != len(p.spatial_values_cm):
-        missing.append("Use the same number of SOA and spatial values, or disable pairing.")
+    if not has_trial_strips(p):
+        missing.append("Create at least one filmstrip row.")
     if not p.tactile_sites:
         missing.append("Keep at least one tactile site.")
     if not p.respiratory_phases:
@@ -785,6 +970,11 @@ def _safe_filename(value: str) -> str:
     name = Path(value).name.strip() or "audio.wav"
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("._")
     return safe or "audio.wav"
+
+
+def _slug(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value).strip()).strip("._")
+    return safe or "stimulus"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

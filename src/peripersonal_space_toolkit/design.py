@@ -6,6 +6,7 @@ import csv
 import json
 import math
 import random
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,7 @@ CUSTOM_AUDIO_NOISE_TYPE = "custom_audio"
 SUPPORTED_IMPORTED_AUDIO_RENDER_MODES = ("spatialize", "preserve")
 SUPPORTED_STIMULUS_SNIPPET_PLACEMENTS = ("before", "after")
 SUPPORTED_STIMULUS_MOTION_MODES = ("looming", "stationary")
+SUPPORTED_TRIAL_STRIP_ELEMENT_TYPES = ("fixed_audio", "looming_stimulus")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
@@ -64,6 +66,23 @@ class NoiseDefinition:
 class BlockSpec:
     label: str
     stimulus_types: list[str] = field(default_factory=lambda: ["Audio-Tactile", "Baseline", "Catch"])
+
+
+@dataclass
+class TrialStripElementSpec:
+    element_id: str = ""
+    kind: str = "looming_stimulus"
+    label: str = ""
+    source_label: str = ""
+    source_labels: list[str] = field(default_factory=list)
+    randomized: bool = False
+
+
+@dataclass
+class TrialStripSpec:
+    strip_id: str = ""
+    label: str = ""
+    elements: list[TrialStripElementSpec] = field(default_factory=list)
 
 
 @dataclass
@@ -114,6 +133,7 @@ class ProtocolSpec:
     respiratory_phases: list[str] = field(default_factory=lambda: ["Inhale", "Exhale"])
     blocks: int = 6
     block_specs: list[BlockSpec] = field(default_factory=list)
+    trial_strips: list[TrialStripSpec] = field(default_factory=list)
     trial_randomization_strategy: str = "no_immediate_repeats"
     block_order_randomization: str = "counterbalanced_rotation"
     max_consecutive_same_trial_type: int = 2
@@ -152,6 +172,11 @@ def design_to_dict(design: StimulusDesign) -> dict[str, Any]:
     return asdict(design)
 
 
+def _slug(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip()).strip("_").lower()
+    return text or "item"
+
+
 def _audio_file_specs_from_dicts(items: list[Any], *, default_motion_mode: str = "looming") -> list[AudioFileSpec]:
     specs: list[AudioFileSpec] = []
     for item in items:
@@ -162,6 +187,26 @@ def _audio_file_specs_from_dicts(items: list[Any], *, default_motion_mode: str =
             data.setdefault("motion_mode", default_motion_mode)
             specs.append(AudioFileSpec(**data))
     return specs
+
+
+def _trial_strip_specs_from_dicts(items: list[Any]) -> list[TrialStripSpec]:
+    strips: list[TrialStripSpec] = []
+    for strip_index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        elements = [
+            TrialStripElementSpec(**element)
+            for element in item.get("elements", [])
+            if isinstance(element, dict)
+        ]
+        strips.append(
+            TrialStripSpec(
+                strip_id=str(item.get("strip_id") or f"strip-{strip_index}"),
+                label=str(item.get("label") or f"Row {strip_index}"),
+                elements=elements,
+            )
+        )
+    return strips
 
 
 def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
@@ -180,6 +225,7 @@ def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
         BlockSpec(**item) if isinstance(item, dict) else BlockSpec(str(item))
         for item in protocol_data.get("block_specs", [])
     ]
+    protocol_data["trial_strips"] = _trial_strip_specs_from_dicts(protocol_data.get("trial_strips", []))
     protocol = ProtocolSpec(**protocol_data)
     return StimulusDesign(
         name=data.get("name", "Study 5 PPS design"),
@@ -375,11 +421,12 @@ def validate_design(design: StimulusDesign) -> list[str]:
         warnings.append("At least one SOA value is required.")
     if any(soa < 0 for soa in p.soa_values_ms):
         warnings.append("SOA values must be non-negative.")
-    if not p.spatial_values_cm:
+    using_trial_strips = has_trial_strips(p)
+    if not using_trial_strips and not p.spatial_values_cm:
         warnings.append("At least one spatial value is required.")
-    if any(value <= 0 for value in p.spatial_values_cm):
+    if p.spatial_values_cm and any(value <= 0 for value in p.spatial_values_cm):
         warnings.append("Spatial values must be positive.")
-    if p.pair_spatial_values_with_soas and len(p.soa_values_ms) != len(p.spatial_values_cm):
+    if not using_trial_strips and p.pair_spatial_values_with_soas and len(p.soa_values_ms) != len(p.spatial_values_cm):
         warnings.append("Paired SOA/spatial mode expects the same number of SOAs and spatial values.")
     if not p.auditory_motion_directions:
         warnings.append("At least one auditory motion direction is required.")
@@ -391,7 +438,7 @@ def validate_design(design: StimulusDesign) -> list[str]:
         warnings.append("Exact catch-trial count cannot be negative.")
     if any(soa < -10000 for soa in p.baseline_soa_values_ms):
         warnings.append("Baseline SOA values look implausibly early.")
-    if not p.respiratory_phases:
+    if not using_trial_strips and not p.respiratory_phases:
         warnings.append("At least one respiratory phase is required.")
     if p.blocks < 1:
         warnings.append("Block count must be at least 1.")
@@ -401,6 +448,33 @@ def validate_design(design: StimulusDesign) -> list[str]:
         warnings.append(f"Unsupported block order randomization strategy: {p.block_order_randomization}")
     if p.max_consecutive_same_trial_type < 1:
         warnings.append("Maximum consecutive same trial type must be at least 1.")
+    source_labels = {str(source["label"]) for source in protocol_sound_sources(design)}
+    fixed_audio_labels = {asset.label for asset in design.prestimulus_files if asset.label.strip()}
+    for strip_index, strip in enumerate(p.trial_strips, start=1):
+        strip_label = strip.label.strip() or f"Row {strip_index}"
+        if not strip.elements:
+            warnings.append(f"{strip_label} must contain at least one filmstrip element.")
+            continue
+        randomized_slots = [
+            element
+            for element in strip.elements
+            if element.kind == "looming_stimulus" and element.randomized
+        ]
+        if len(randomized_slots) != 1:
+            warnings.append(f"{strip_label} must contain exactly one randomized Looming Stimulus slot.")
+        for element in strip.elements:
+            if element.kind not in SUPPORTED_TRIAL_STRIP_ELEMENT_TYPES:
+                warnings.append(f"{strip_label} contains unsupported filmstrip element type: {element.kind}")
+            if element.kind == "fixed_audio" and element.source_label and element.source_label not in fixed_audio_labels:
+                warnings.append(f"{strip_label} references an unknown fixed audio clip: {element.source_label}")
+            if element.kind == "looming_stimulus":
+                unknown_sources = [
+                    label
+                    for label in element.source_labels
+                    if label and label not in source_labels
+                ]
+                if unknown_sources:
+                    warnings.append(f"{strip_label} references unknown stimulus source(s): {', '.join(unknown_sources)}")
     block_specs = effective_block_specs(p)
     if not block_specs:
         warnings.append("At least one block must be defined.")
@@ -458,6 +532,172 @@ def baseline_factor_pairs(protocol: ProtocolSpec) -> list[tuple[int, float]]:
         return protocol_factor_pairs(protocol)
     spatial = protocol.spatial_values_cm[0] if protocol.spatial_values_cm else 0.0
     return [(soa, spatial) for soa in protocol.baseline_soa_values_ms]
+
+
+def has_trial_strips(protocol: ProtocolSpec) -> bool:
+    return any(strip.elements for strip in protocol.trial_strips)
+
+
+def _strip_randomized_slot(strip: TrialStripSpec) -> TrialStripElementSpec | None:
+    for element in strip.elements:
+        if element.kind == "looming_stimulus" and element.randomized:
+            return element
+    for element in strip.elements:
+        if element.kind == "looming_stimulus":
+            return element
+    return None
+
+
+def _source_by_label(design: StimulusDesign) -> dict[str, dict[str, Any]]:
+    return {str(source["label"]): source for source in protocol_sound_sources(design)}
+
+
+def _fixed_audio_by_label(design: StimulusDesign) -> dict[str, AudioFileSpec]:
+    return {asset.label: asset for asset in design.prestimulus_files if asset.label.strip()}
+
+
+def _strip_sources(design: StimulusDesign, slot: TrialStripElementSpec | None) -> list[dict[str, Any]]:
+    sources = _source_by_label(design)
+    if not slot:
+        return []
+    labels = [label for label in slot.source_labels if label]
+    if not labels:
+        return list(sources.values())
+    return [sources[label] for label in labels if label in sources]
+
+
+def _strip_fixed_audio(strip: TrialStripSpec, design: StimulusDesign) -> list[AudioFileSpec]:
+    fixed = _fixed_audio_by_label(design)
+    clips: list[AudioFileSpec] = []
+    for element in strip.elements:
+        if element.kind != "fixed_audio":
+            continue
+        clip = fixed.get(element.source_label)
+        if clip:
+            clips.append(clip)
+    return clips
+
+
+def _strip_sequence_labels(strip: TrialStripSpec, source_label: str) -> list[str]:
+    labels: list[str] = []
+    for element in strip.elements:
+        if element.kind == "fixed_audio":
+            labels.append(element.label or element.source_label or "Fixed audio")
+        elif element.kind == "looming_stimulus":
+            labels.append(source_label or element.label or "Looming Stimulus")
+    return labels
+
+
+def _spatial_value_for_soa(protocol: ProtocolSpec, soa_index: int) -> float:
+    if not protocol.spatial_values_cm:
+        return 0.0
+    if protocol.pair_spatial_values_with_soas:
+        return protocol.spatial_values_cm[min(soa_index, len(protocol.spatial_values_cm) - 1)]
+    return protocol.spatial_values_cm[0]
+
+
+def _filmstrip_condition_rows_for_strip(
+    design: StimulusDesign,
+    strip: TrialStripSpec,
+    strip_index: int,
+) -> list[dict[str, Any]]:
+    protocol = design.protocol
+    slot = _strip_randomized_slot(strip)
+    sources = _strip_sources(design, slot)
+    fixed_clips = _strip_fixed_audio(strip, design)
+    fixed_labels = [clip.label for clip in fixed_clips]
+    fixed_paths = [clip.path for clip in fixed_clips]
+    strip_id = strip.strip_id or f"strip-{strip_index}"
+    strip_label = strip.label or f"Row {strip_index}"
+    rows: list[dict[str, Any]] = []
+    tactile_sites = protocol.tactile_sites or ["hand"]
+
+    for repetition in range(1, protocol.repetitions_per_condition + 1):
+        for tactile_site in tactile_sites:
+            for soa_index, soa_ms in enumerate(protocol.soa_values_ms):
+                spatial_cm = _spatial_value_for_soa(protocol, soa_index)
+                for source in sources:
+                    source_label = str(source.get("label", ""))
+                    sequence_labels = _strip_sequence_labels(strip, source_label)
+                    rows.append(
+                        {
+                            "trial_type": "Audio-Tactile",
+                            "repetition": repetition,
+                            "tactile_site": tactile_site,
+                            "motion_direction": "looming",
+                            "phase": strip_label,
+                            "soa_ms": soa_ms,
+                            "spatial_value_cm": spatial_cm,
+                            "noise_label": source_label,
+                            "noise_type": source.get("noise_type", ""),
+                            "azimuth_deg": source.get("azimuth_deg", ""),
+                            "elevation_deg": source.get("elevation_deg", ""),
+                            "trial_strip_id": strip_id,
+                            "trial_strip_label": strip_label,
+                            "trial_strip_index": strip_index,
+                            "tactile_enabled": True,
+                            "fixed_audio_labels": "; ".join(fixed_labels),
+                            "fixed_audio_paths": "; ".join(fixed_paths),
+                            "sequence_labels": " | ".join(sequence_labels),
+                            "trial_unit_key": _slug(f"{strip_id}_{source_label}_{soa_ms}_{repetition}"),
+                        }
+                    )
+    return rows
+
+
+def _with_filmstrip_catches(rows: list[dict[str, Any]], protocol: ProtocolSpec) -> list[dict[str, Any]]:
+    if protocol.catch_trials_exact is not None:
+        catch_count = protocol.catch_trials_exact
+    elif protocol.catch_trial_percentage > 0:
+        catch_count = int(math.ceil(len(rows) * protocol.catch_trial_percentage / (100.0 - protocol.catch_trial_percentage)))
+    else:
+        catch_count = 0
+    if not rows or catch_count <= 0:
+        return rows
+    with_catches = list(rows)
+    for index in range(catch_count):
+        template = dict(rows[index % len(rows)])
+        template["trial_type"] = "Catch"
+        template["repetition"] = ""
+        template["tactile_enabled"] = False
+        template["trial_unit_key"] = _slug(f"{template.get('trial_unit_key', 'catch')}_catch_{index + 1}")
+        with_catches.append(template)
+    return with_catches
+
+
+def _filmstrip_block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
+    protocol = design.protocol
+    scheduled: list[dict[str, Any]] = []
+    strips = [strip for strip in protocol.trial_strips if strip.elements]
+    for block_index, block in enumerate(effective_block_specs(protocol), start=1):
+        if "Audio-Tactile" not in block.stimulus_types and "Catch" not in block.stimulus_types:
+            continue
+        strip_queues: list[list[dict[str, Any]]] = []
+        for strip_index, strip in enumerate(strips, start=1):
+            rows = _filmstrip_condition_rows_for_strip(design, strip, strip_index)
+            rows = _with_filmstrip_catches(rows, protocol)
+            randomized = _randomize_rows(
+                rows,
+                protocol,
+                seed=protocol.random_seed + block_index * 1009 + strip_index * 917,
+            )
+            strip_queues.append(randomized)
+        block_trial_index = 1
+        while any(strip_queues):
+            for queue in strip_queues:
+                if not queue:
+                    continue
+                row = queue.pop(0)
+                scheduled.append(
+                    {
+                        "block_index": block_index,
+                        "block_label": block.label,
+                        "block_trial_index": block_trial_index,
+                        **row,
+                    }
+                )
+                block_trial_index += 1
+    return scheduled
 
 
 def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
@@ -631,6 +871,9 @@ def _randomize_rows(rows: list[dict[str, Any]], protocol: ProtocolSpec, seed: in
 
 def block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     protocol = design.protocol
+    if has_trial_strips(protocol):
+        return _filmstrip_block_trial_rows(design)
+
     blocks = effective_block_specs(protocol)
     block_rows: dict[str, list[dict[str, Any]]] = {block.label: [] for block in blocks}
     rows_by_type: dict[str, list[dict[str, Any]]] = {trial_type: [] for trial_type in SUPPORTED_TRIAL_TYPES}
@@ -768,9 +1011,17 @@ def export_protocol_csv(design: StimulusDesign, path: Path) -> None:
         "noise_type",
         "azimuth_deg",
         "elevation_deg",
+        "trial_strip_id",
+        "trial_strip_label",
+        "trial_strip_index",
+        "tactile_enabled",
+        "fixed_audio_labels",
+        "fixed_audio_paths",
+        "sequence_labels",
+        "trial_unit_key",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 

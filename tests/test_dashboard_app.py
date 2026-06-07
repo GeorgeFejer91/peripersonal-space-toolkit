@@ -100,6 +100,8 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="import-audio-preserve"' in html
     assert 'id="import-audio-prestimulus"' in html
     assert 'id="generated-noise-select"' in html
+    assert 'id="bake-stimulus"' in html
+    assert 'id="bake-status"' in html
     assert 'id="noise-list"' in html
     assert 'id="audio-list"' in html
     assert 'id="assembly-list"' not in html
@@ -111,9 +113,18 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="add-audio-preserve"' not in html
     assert "Stimulus Selection" in html
     assert "Custom Stimulus Builder" not in html
+    assert "Bake Stimulus" in html
+    assert "Choose noise to bake" in html
+    assert "Add generated noise..." not in html
     assert "Dry Custom Tone" in html
     assert "Already Looming / Control" in html
     assert "Instruction Snippet" in html
+    assert "/api/stimulus/bake" in app_js
+    assert "/api/local/open-folder" in app_js
+    assert "data-open-folder" in app_js
+    assert "Open Folder" in app_js
+    assert "startBakeStimulus" in app_js
+    assert "stageGeneratedNoise" in app_js
     assert "IMPORTED_AUDIO_HANDLING" in app_js
     assert "PROCEDURAL_NOISE_TYPES" in app_js
     assert "STIMULUS_SNIPPET_PLACEMENTS" in app_js
@@ -172,6 +183,21 @@ def test_dashboard_state_templates_and_design_update(tmp_path: Path):
     ]
     custom["design"]["protocol"]["soa_values_ms"] = [300]
     custom["design"]["protocol"]["spatial_values_cm"] = [100.0]
+    custom["design"]["protocol"]["trial_strips"] = [
+        {
+            "strip_id": "strip-1",
+            "label": "Manual row",
+            "elements": [
+                {
+                    "element_id": "looming-1",
+                    "kind": "looming_stimulus",
+                    "label": "Looming Stimulus",
+                    "source_labels": ["Manual pink"],
+                    "randomized": True,
+                }
+            ],
+        }
+    ]
     custom_ready = client.post("/api/design", json={"participant_id": "", "design": custom["design"]}).json()
     assert custom_ready["custom_workflow"]["ready_to_render"]
     assert not custom_ready["custom_workflow"]["ready_to_prepare"]
@@ -248,6 +274,82 @@ def test_dashboard_import_audio_is_local_only(tmp_path: Path):
     assert snippet["audio"]["gap_s"] == 0.25
     assert snippet["audio"]["sequence_order"] == 3
     assert snippet["audio"]["motion_mode"] == "stationary"
+
+
+def test_dashboard_bake_stimulus_job_adds_source_after_render(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path)
+    custom = client.post("/api/templates/__custom__/load").json()
+    custom["design"]["name"] = "Manual bake design"
+    custom["design"]["protocol"]["soa_values_ms"] = [300]
+    custom["design"]["protocol"]["spatial_values_cm"] = [100.0]
+    custom["design"]["protocol"]["trial_strips"] = [
+        {
+            "strip_id": "strip-1",
+            "label": "Manual row",
+            "elements": [
+                {
+                    "element_id": "looming-1",
+                    "kind": "looming_stimulus",
+                    "label": "Looming Stimulus",
+                    "source_labels": ["Manual blue"],
+                    "randomized": True,
+                }
+            ],
+        }
+    ]
+
+    def fake_render(design_path, output_dir, *, seed, **_kwargs):
+        design_data = json.loads(Path(design_path).read_text(encoding="utf-8"))
+        label = design_data["noises"][0]["label"]
+        wav_path = Path(output_dir) / "looming_manual_blue.wav"
+        sf.write(wav_path, np.zeros((441, 3), dtype=np.float32), 44100)
+        manifest = Path(output_dir) / "render_manifest.json"
+        qc = Path(output_dir) / "render_qc.csv"
+        tactile = Path(output_dir) / "render_tactile_events.csv"
+        manifest.write_text(
+            json.dumps({"status": "rendered_reference", "wav_outputs": [{"path": str(wav_path), "sha256": "test"}]}),
+            encoding="utf-8",
+        )
+        qc.write_text("", encoding="utf-8")
+        tactile.write_text("", encoding="utf-8")
+        assert label == "Manual blue"
+        assert seed == custom["design"]["protocol"]["random_seed"]
+        return RenderResult("rendered_reference", 0, Path(output_dir), Path(design_path), manifest, qc, wav_paths=(wav_path,), tactile_events_path=tactile)
+
+    monkeypatch.setattr(dashboard_app.render_backend, "render_design_with_3dti", fake_render)
+    job = client.post(
+        "/api/stimulus/bake",
+        json={
+            "participant_id": "",
+            "design": custom["design"],
+            "bake_recipe": {"kind": "generated_noise", "noise_type": "blue", "label": "Manual blue", "gain": 0.7},
+        },
+    ).json()
+    done = _wait_job(client, job["job_id"])
+    state = client.get("/api/state").json()
+
+    assert done["status"] == "succeeded"
+    assert done["result"]["local_only"] is True
+    assert done["result"]["source_kind"] == "generated_noise"
+    assert any(noise["label"] == "Manual blue" and noise["noise_type"] == "blue" for noise in state["design"]["noises"])
+    assert state["render"]["wav_count"] >= 1
+    assert state["custom_workflow"]["ready_to_render"] is True
+
+
+def test_dashboard_open_folder_is_local_backend_action(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path)
+    wav_path = tmp_path / "rendered" / "looming_pink_frontal.wav"
+    calls = []
+
+    class FakeProcess:
+        pid = 123
+
+    monkeypatch.setattr(dashboard_app.subprocess, "Popen", lambda args, **_kwargs: calls.append(args) or FakeProcess())
+    opened = client.post("/api/local/open-folder", json={"path": str(wav_path)}).json()
+
+    assert opened["local_only"] is True
+    assert opened["folder"] == str(wav_path.parent.resolve())
+    assert calls
 
 
 def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):
