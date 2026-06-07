@@ -7,6 +7,7 @@ Read this file before modifying the repository. Then read:
 - [project_context.md](project_context.md) for aims, scope, architecture, and current boundaries.
 - [evolving_goals.md](evolving_goals.md) for active decisions and dated project direction.
 - [agent_update_protocol.md](agent_update_protocol.md) for how to keep this folder current.
+- [skills/html-dashboard-orchestrator/SKILL.md](skills/html-dashboard-orchestrator/SKILL.md) before making HTML dashboard or hosted-GitHub-Pages GUI changes.
 
 ## Project Summary
 
@@ -21,6 +22,7 @@ The toolkit currently centers on:
 - a stimulus/trial designer for configurable audio-tactile PPS paradigms
 - preloadable published-study templates
 - public-release safeguards that keep participant data, generated outputs, models, SOFA/HRIR files, and third-party assets out of Git
+- a project-local skill workflow for safely changing the HTML dashboard as a local software orchestrator
 
 ## Agent Requirement
 

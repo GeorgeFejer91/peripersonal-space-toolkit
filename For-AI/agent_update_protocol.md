@@ -9,11 +9,12 @@ Every AI agent working in this repository must:
 1. Read `AGENTS.md`.
 2. Read `For-AI/README.md`.
 3. Consult `project_context.md` and `evolving_goals.md` before planning or editing.
-4. Do the requested work.
-5. If the work changes the HTML/dashboard web GUI, update the matching online website/static GitHub Pages version in the same change set before finalizing.
-6. Before finalizing, decide whether the work was substantive.
-7. If substantive, update the relevant `For-AI/` file.
-8. In the final response, state whether `For-AI/` was updated.
+4. If the work changes the HTML/dashboard web GUI, read `For-AI/skills/html-dashboard-orchestrator/SKILL.md` before editing.
+5. Do the requested work.
+6. If the work changes the HTML/dashboard web GUI, update the matching online website/static GitHub Pages version in the same change set before finalizing.
+7. Before finalizing, decide whether the work was substantive.
+8. If substantive, update the relevant `For-AI/` file.
+9. In the final response, state whether `For-AI/` was updated.
 
 ## What Counts As Substantive
 
