@@ -138,25 +138,9 @@
 
             <div class="table-toolbar">
               <span>Custom local audio sources</span>
-              <div class="toolbar-actions">
-                <button id="add-audio-spatialize" type="button">Add Dry Path</button>
-                <button id="add-audio-preserve" type="button">Add Preserve Path</button>
-              </div>
             </div>
             <input id="audio-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/mpeg,audio/mp3" hidden>
-            <table class="data-table source-table" id="audio-table">
-              <thead>
-                <tr>
-                  <th>Source handling</th>
-                  <th>Label</th>
-                  <th>Local path</th>
-                  <th>Target s</th>
-                  <th>Gain</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+            <div class="source-card-list" id="audio-list"></div>
             <div class="step-footer">
               <button type="button" class="primary" data-continue-step="stimulus">Continue To Trials</button>
             </div>

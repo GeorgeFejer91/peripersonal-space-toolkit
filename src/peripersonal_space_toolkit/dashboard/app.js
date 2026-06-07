@@ -276,35 +276,55 @@ function renderNoiseTable() {
 }
 
 function renderAudioTable() {
-  const body = $("audio-table").querySelector("tbody");
-  body.innerHTML = "";
+  const list = $("audio-list");
+  list.innerHTML = "";
   const rows = [
     ...(state.design.custom_looming_files || []).map((item) => ({ ...item, audio_role: item.render_mode || "preserve" })),
     ...(state.design.prestimulus_files || []).map((item) => ({ ...item, audio_role: "prestimulus" }))
   ];
   for (const audio of rows) {
-    const row = body.insertRow();
     const role = String(audio.audio_role || audio.use || audio.render_mode || "preserve").toLowerCase();
-    row.innerHTML = `
-      <td>
-        <select data-field="audio_role">
-          ${IMPORTED_AUDIO_HANDLING.map((item) => `<option value="${item.value}" ${item.value === role ? "selected" : ""}>${item.label}</option>`).join("")}
-        </select>
-      </td>
-      <td><input data-field="label" value="${escapeAttr(audio.label || "")}"></td>
-      <td><input data-field="path" value="${escapeAttr(audio.path || "")}"></td>
-      <td><input data-field="target_duration_s" type="number" min="0.1" step="0.1" value="${Number(audio.target_duration_s || 4)}"></td>
-      <td><input data-field="gain" type="number" min="0.01" step="0.05" value="${Number(audio.gain || 1)}"></td>
-      <td class="remove-cell"><button type="button" data-remove-audio>Remove</button></td>
+    const card = document.createElement("div");
+    card.className = "source-card audio-source-card";
+    card.innerHTML = `
+      <div class="source-card-heading">
+        <strong>${escapeHtml(audioRoleTitle(role))}</strong>
+        <button type="button" data-remove-audio>Remove</button>
+      </div>
+      <div class="source-card-fields audio-source-fields">
+        <div class="field-row">
+          <label>Source handling</label>
+          <select data-field="audio_role">
+            ${IMPORTED_AUDIO_HANDLING.map((item) => `<option value="${item.value}" ${item.value === role ? "selected" : ""}>${item.label}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Label</label>
+          <input data-field="label" value="${escapeAttr(audio.label || "")}">
+        </div>
+        <div class="field-row">
+          <label>Local path</label>
+          <input data-field="path" value="${escapeAttr(audio.path || "")}">
+        </div>
+        <div class="field-row">
+          <label>Target s</label>
+          <input data-field="target_duration_s" type="number" min="0.1" step="0.1" value="${Number(audio.target_duration_s || 4)}">
+        </div>
+        <div class="field-row">
+          <label>Gain</label>
+          <input data-field="gain" type="number" min="0.01" step="0.05" value="${Number(audio.gain || 1)}">
+        </div>
+      </div>
     `;
+    list.appendChild(card);
   }
 }
 
 function renderSourceCounts() {
   const generated = $("noise-list").querySelectorAll(".noise-source-card").length;
-  const audioRows = [...$("audio-table").querySelectorAll("tbody tr")];
-  const imported = audioRows.filter((row) => row.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
-  const prestimulus = audioRows.filter((row) => row.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
+  const audioCards = [...$("audio-list").querySelectorAll(".audio-source-card")];
+  const imported = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
+  const prestimulus = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
   const total = generated + imported + prestimulus;
   $("source-counts").textContent = `${total} source${total === 1 ? "" : "s"}`;
   $("source-counts").className = `status-label ${generated || imported ? "ready" : "required"}`;
@@ -522,8 +542,8 @@ function collectNoises() {
 
 function collectAudioFiles() {
   const result = { looming: [], prestimulus: [] };
-  for (const row of $("audio-table").querySelectorAll("tbody tr")) {
-    const field = (name) => row.querySelector(`[data-field="${name}"]`);
+  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+    const field = (name) => card.querySelector(`[data-field="${name}"]`);
     const role = field("audio_role").value;
     const item = {
       label: field("label").value.trim() || "Audio file",
@@ -960,17 +980,10 @@ function noiseTypeLabel(noiseType) {
   return PROCEDURAL_NOISE_TYPES.find((item) => item.value === noiseType)?.label || "Generated";
 }
 
-function addAudioRow(renderMode = "preserve") {
-  state.design.custom_looming_files = state.design.custom_looming_files || [];
-  state.design.custom_looming_files.push({
-    label: renderMode === "spatialize" ? "Dry custom tone" : "Already looming audio",
-    path: "",
-    target_duration_s: 4,
-    render_mode: renderMode === "spatialize" ? "spatialize" : "preserve",
-    gain: 1
-  });
-  renderAudioTable();
-  renderSourceCounts();
+function audioRoleTitle(role) {
+  if (role === "spatialize") return "Dry custom tone";
+  if (role === "prestimulus") return "Prestimulus cue";
+  return "Already looming / control";
 }
 
 function openAudioPicker(renderMode) {
@@ -1076,8 +1089,6 @@ function wireEvents() {
     addNoiseRow(selectedNoise);
     $("generated-noise-select").value = "";
   });
-  $("add-audio-spatialize").addEventListener("click", () => addAudioRow("spatialize"));
-  $("add-audio-preserve").addEventListener("click", () => addAudioRow("preserve"));
   $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
   $("import-audio-preserve").addEventListener("click", () => openAudioPicker("preserve"));
   $("audio-file-input").addEventListener("change", () => importAudioFromPicker().catch(reportError));
@@ -1128,6 +1139,9 @@ function wireEvents() {
   });
   document.addEventListener("change", (event) => {
     if (event.target.matches('[data-field="audio_role"]')) {
+      const card = event.target.closest(".audio-source-card");
+      const title = card?.querySelector(".source-card-heading strong");
+      if (title) title.textContent = audioRoleTitle(event.target.value);
       renderSourceCounts();
     }
     if (event.target.matches('.noise-source-card [data-field="noise_type"]')) {

@@ -100,13 +100,17 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="import-audio-preserve"' in html
     assert 'id="generated-noise-select"' in html
     assert 'id="noise-list"' in html
+    assert 'id="audio-list"' in html
     assert 'id="source-counts"' in html
+    assert 'id="add-audio-spatialize"' not in html
+    assert 'id="add-audio-preserve"' not in html
     assert "Stimulus Selection" in html
     assert "Dry Custom Tone" in html
     assert "Already Looming / Control" in html
     assert "IMPORTED_AUDIO_HANDLING" in app_js
     assert "PROCEDURAL_NOISE_TYPES" in app_js
     assert "noise-source-card" in app_js
+    assert "audio-source-card" in app_js
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js
