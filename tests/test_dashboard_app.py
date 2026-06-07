@@ -98,19 +98,25 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="audio-file-input"' in html
     assert 'id="import-audio-spatialize"' in html
     assert 'id="import-audio-preserve"' in html
+    assert 'id="import-audio-prestimulus"' in html
     assert 'id="generated-noise-select"' in html
     assert 'id="noise-list"' in html
     assert 'id="audio-list"' in html
+    assert 'id="assembly-list"' in html
     assert 'id="source-counts"' in html
     assert 'id="add-audio-spatialize"' not in html
     assert 'id="add-audio-preserve"' not in html
     assert "Stimulus Selection" in html
+    assert "Custom Stimulus Builder" in html
     assert "Dry Custom Tone" in html
     assert "Already Looming / Control" in html
+    assert "Instruction Snippet" in html
     assert "IMPORTED_AUDIO_HANDLING" in app_js
     assert "PROCEDURAL_NOISE_TYPES" in app_js
+    assert "STIMULUS_SNIPPET_PLACEMENTS" in app_js
     assert "noise-source-card" in app_js
     assert "audio-source-card" in app_js
+    assert "assembly-list" in app_js
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js
@@ -215,6 +221,24 @@ def test_dashboard_import_audio_is_local_only(tmp_path: Path):
     assert imported["audio"]["label"] == "manual_loom"
     assert imported["audio"]["target_duration_s"] > 0
     assert imported["audio"]["render_mode"] == "spatialize"
+
+    snippet_payload = {
+        "filename": source.name,
+        "content_base64": base64.b64encode(source.read_bytes()).decode("ascii"),
+        "use": "prestimulus",
+        "render_mode": "preserve",
+        "placement": "after",
+        "target_source_label": "Manual pink",
+        "phase": "Inhale",
+        "gap_s": 0.25,
+    }
+    snippet = client.post("/api/audio/import", json=snippet_payload).json()
+
+    assert snippet["local_only"] is True
+    assert snippet["audio"]["placement"] == "after"
+    assert snippet["audio"]["target_source_label"] == "Manual pink"
+    assert snippet["audio"]["phase"] == "Inhale"
+    assert snippet["audio"]["gap_s"] == 0.25
 
 
 def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):

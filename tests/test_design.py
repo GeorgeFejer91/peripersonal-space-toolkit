@@ -23,7 +23,7 @@ from peripersonal_space_toolkit.design import (
     trajectory_points,
     validate_design,
 )
-from peripersonal_space_toolkit.render_backend import render_design_with_3dti
+from peripersonal_space_toolkit.render_backend import build_render_config, render_design_with_3dti
 from peripersonal_space_toolkit.templates import load_templates
 
 
@@ -40,7 +40,17 @@ def test_default_design_matches_four_second_study5_timing():
 def test_design_json_round_trip_and_trajectory_export(tmp_path: Path):
     design = default_design()
     design.custom_looming_files = [AudioFileSpec("custom pink", "C:/stimuli/custom_pink.wav", 4.0)]
-    design.prestimulus_files = [AudioFileSpec("inhale", "C:/stimuli/inhale.wav", 4.0)]
+    design.prestimulus_files = [
+        AudioFileSpec(
+            "inhale",
+            "C:/stimuli/inhale.wav",
+            4.0,
+            placement="before",
+            target_source_label="Pink frontal",
+            phase="Inhale",
+            gap_s=0.25,
+        )
+    ]
     design_path = tmp_path / "design.json"
     csv_path = tmp_path / "trajectory.csv"
     save_design(design, design_path)
@@ -48,6 +58,10 @@ def test_design_json_round_trip_and_trajectory_export(tmp_path: Path):
     assert loaded.noises[0].noise_type == "pink"
     assert loaded.custom_looming_files[0].label == "custom pink"
     assert loaded.prestimulus_files[0].path.endswith("inhale.wav")
+    assert loaded.prestimulus_files[0].placement == "before"
+    assert loaded.prestimulus_files[0].target_source_label == "Pink frontal"
+    assert loaded.prestimulus_files[0].phase == "Inhale"
+    assert loaded.prestimulus_files[0].gap_s == pytest.approx(0.25)
 
     export_trajectory_csv(loaded, csv_path, samples=7)
     text = csv_path.read_text(encoding="utf-8")
@@ -64,7 +78,32 @@ def test_design_loads_string_audio_preload_paths():
     )
     assert design.custom_looming_files[0].label == "custom_looming"
     assert design.prestimulus_files[0].target_duration_s == 4.0
+    assert design.prestimulus_files[0].placement == "before"
 
+
+def test_render_config_records_custom_stimulus_assembly(tmp_path: Path):
+    design = default_design()
+    design.prestimulus_files = [
+        AudioFileSpec(
+            "inhale instruction",
+            "assets/breathing/Inhale.wav",
+            4.0,
+            placement="before",
+            target_source_label="Pink frontal",
+            phase="Inhale",
+            gap_s=0.15,
+        )
+    ]
+
+    config = build_render_config(design, seed=20250604, output_dir=tmp_path)
+
+    snippets = config["source"]["stimulus_assembly"]["snippets"]
+    assert config["source"]["stimulus_assembly"]["integration"] == "recorded_for_session_assembly"
+    assert snippets[0]["label"] == "inhale instruction"
+    assert snippets[0]["placement"] == "before"
+    assert snippets[0]["target_source_label"] == "Pink frontal"
+    assert snippets[0]["phase"] == "Inhale"
+    assert snippets[0]["gap_s"] == pytest.approx(0.15)
 
 
 def test_imported_looming_audio_can_render_as_experiment_source(tmp_path: Path):

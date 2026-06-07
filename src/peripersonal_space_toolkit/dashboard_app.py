@@ -285,12 +285,19 @@ class DashboardController:
         render_mode = str(payload.get("render_mode") or "preserve").strip().lower()
         if render_mode not in {"spatialize", "preserve"}:
             render_mode = "preserve"
+        placement = str(payload.get("placement") or "before").strip().lower()
+        if placement not in {"before", "after"}:
+            placement = "before"
         audio = AudioFileSpec(
             label=label,
             path=str(path),
             target_duration_s=duration_s,
             render_mode=render_mode,
             gain=_float(payload.get("gain"), 1.0),
+            placement=placement,
+            target_source_label=str(payload.get("target_source_label") or "").strip(),
+            phase=str(payload.get("phase") or "").strip(),
+            gap_s=max(0.0, _float(payload.get("gap_s"), 0.0)),
         )
         return {
             "audio": asdict(audio),

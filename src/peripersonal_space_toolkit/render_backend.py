@@ -144,6 +144,27 @@ def _noise_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     return rows
 
 
+def _stimulus_assembly_rows(design: StimulusDesign) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for asset in design.prestimulus_files:
+        if not asset.label.strip() and not asset.path.strip():
+            continue
+        rows.append(
+            {
+                "label": asset.label,
+                "path": asset.path,
+                "target_duration_s": asset.target_duration_s,
+                "gain": asset.gain,
+                "placement": asset.placement,
+                "target_source_label": asset.target_source_label,
+                "phase": asset.phase,
+                "gap_s": asset.gap_s,
+                "source_render_mode": asset.render_mode,
+            }
+        )
+    return rows
+
+
 def _listener_head_diameter_m(design: StimulusDesign) -> float:
     value = design.study_profile_reference_parameters.get("head_diameter_m", DEFAULT_HEAD_DIAMETER_M)
     try:
@@ -533,6 +554,10 @@ def build_render_config(
             "sample_rate": sample_rate,
             "noises": sources,
             "imported_audio_count": imported_source_count,
+            "stimulus_assembly": {
+                "snippets": _stimulus_assembly_rows(design),
+                "integration": "recorded_for_session_assembly",
+            },
             "gain_law": "3DTI_free_field_direct_path",
             "sofa_file": sofa_file,
             "sofa_file_sha256": sha256_file(sofa_path),

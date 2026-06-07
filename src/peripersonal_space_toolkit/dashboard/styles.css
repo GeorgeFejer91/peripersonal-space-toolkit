@@ -524,7 +524,7 @@ select:focus {
 
 .source-action-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -577,6 +577,40 @@ select:focus {
   padding: 9px;
 }
 
+.stimulus-builder {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0;
+  margin-top: 10px;
+}
+
+.assembly-list {
+  display: grid;
+  gap: 8px;
+}
+
+.assembly-item,
+.assembly-empty {
+  min-height: 40px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.assembly-item strong {
+  font-size: 13px;
+}
+
+.assembly-item span,
+.assembly-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .source-card-heading {
   min-height: 32px;
   display: flex;
@@ -597,7 +631,19 @@ select:focus {
 }
 
 .audio-source-fields {
-  grid-template-columns: minmax(150px, 1fr) minmax(140px, 1fr) minmax(220px, 1.7fr) repeat(2, minmax(84px, 0.65fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.audio-path-field {
+  grid-column: span 2;
+}
+
+.audio-source-card:not([data-audio-role="prestimulus"]) .assembly-only {
+  display: none;
+}
+
+.audio-source-card[data-audio-role="prestimulus"] {
+  border-color: #b8d9cf;
 }
 
 .source-card-fields .field-row {
@@ -893,7 +939,7 @@ select:focus {
   }
 
   .source-action-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .source-card-fields {
@@ -902,6 +948,10 @@ select:focus {
 
   .audio-source-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audio-path-field {
+    grid-column: span 2;
   }
 
   .workspace-splitter {
@@ -930,5 +980,9 @@ select:focus {
 
   .audio-source-fields {
     grid-template-columns: 1fr;
+  }
+
+  .audio-path-field {
+    grid-column: span 1;
   }
 }

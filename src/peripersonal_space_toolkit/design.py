@@ -16,6 +16,7 @@ import numpy as np
 SUPPORTED_NOISE_TYPES = ("pink", "blue", "violet", "white", "brown")
 CUSTOM_AUDIO_NOISE_TYPE = "custom_audio"
 SUPPORTED_IMPORTED_AUDIO_RENDER_MODES = ("spatialize", "preserve")
+SUPPORTED_STIMULUS_SNIPPET_PLACEMENTS = ("before", "after")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
@@ -39,6 +40,10 @@ class AudioFileSpec:
     target_duration_s: float = 4.0
     render_mode: str = "preserve"
     gain: float = 1.0
+    placement: str = "before"
+    target_source_label: str = ""
+    phase: str = ""
+    gap_s: float = 0.0
 
 
 @dataclass
@@ -321,6 +326,10 @@ def validate_design(design: StimulusDesign) -> list[str]:
                 warnings.append(f"{asset.label} imported audio render mode is unsupported: {asset.render_mode}")
             if asset.gain <= 0:
                 warnings.append(f"{asset.label} gain must be positive.")
+            if asset.placement not in SUPPORTED_STIMULUS_SNIPPET_PLACEMENTS:
+                warnings.append(f"{asset.label} stimulus snippet placement is unsupported: {asset.placement}")
+            if asset.gap_s < 0:
+                warnings.append(f"{asset.label} stimulus snippet gap cannot be negative.")
 
     t = design.trajectory
     if t.path_direction not in SUPPORTED_DIRECTIONS:
@@ -533,6 +542,10 @@ def protocol_sound_sources(design: StimulusDesign) -> list[dict[str, Any]]:
             "source_path": asset.path,
             "target_duration_s": asset.target_duration_s,
             "source_render_mode": asset.render_mode,
+            "stimulus_placement": asset.placement,
+            "target_source_label": asset.target_source_label,
+            "phase": asset.phase,
+            "gap_s": asset.gap_s,
         }
         for asset in design.custom_looming_files
         if asset.label.strip() or asset.path.strip()

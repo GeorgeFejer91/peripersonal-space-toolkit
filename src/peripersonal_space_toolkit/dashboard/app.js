@@ -38,7 +38,11 @@ const PROCEDURAL_NOISE_TYPES = [
 const IMPORTED_AUDIO_HANDLING = [
   { value: "spatialize", label: "Dry tone -> make looming" },
   { value: "preserve", label: "Already looming / control" },
-  { value: "prestimulus", label: "Prestimulus cue" }
+  { value: "prestimulus", label: "Instruction snippet" }
+];
+const STIMULUS_SNIPPET_PLACEMENTS = [
+  { value: "before", label: "Before stimulus" },
+  { value: "after", label: "After stimulus" }
 ];
 const TRAJECTORY_FIELD_IDS = [
   "start-distance",
@@ -218,6 +222,8 @@ function renderStimulus() {
   renderGeneratedNoiseSelect();
   renderNoiseTable();
   renderAudioTable();
+  refreshAssemblyTargetOptions();
+  renderStimulusAssembly();
   renderSourceCounts();
 }
 
@@ -284,8 +290,12 @@ function renderAudioTable() {
   ];
   for (const audio of rows) {
     const role = String(audio.audio_role || audio.use || audio.render_mode || "preserve").toLowerCase();
+    const placement = normalizeSnippetPlacement(audio.placement);
+    const targetSource = audio.target_source_label || "";
+    const phase = audio.phase || "";
     const card = document.createElement("div");
     card.className = "source-card audio-source-card";
+    card.dataset.audioRole = role;
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(audioRoleTitle(role))}</strong>
@@ -302,9 +312,31 @@ function renderAudioTable() {
           <label>Label</label>
           <input data-field="label" value="${escapeAttr(audio.label || "")}">
         </div>
-        <div class="field-row">
+        <div class="field-row audio-path-field">
           <label>Local path</label>
           <input data-field="path" value="${escapeAttr(audio.path || "")}">
+        </div>
+        <div class="field-row assembly-only">
+          <label>Placement</label>
+          <select data-field="placement">
+            ${STIMULUS_SNIPPET_PLACEMENTS.map((item) => `<option value="${item.value}" ${item.value === placement ? "selected" : ""}>${item.label}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field-row assembly-only">
+          <label>Attach to</label>
+          <select data-field="target_source_label" data-selected-target="${escapeAttr(targetSource)}">
+            ${stimulusTargetOptionsFromDesign(targetSource)}
+          </select>
+        </div>
+        <div class="field-row assembly-only">
+          <label>Phase</label>
+          <select data-field="phase">
+            ${stimulusPhaseOptions(phase)}
+          </select>
+        </div>
+        <div class="field-row assembly-only">
+          <label>Gap s</label>
+          <input data-field="gap_s" type="number" min="0" step="0.05" value="${Number(audio.gap_s || 0)}">
         </div>
         <div class="field-row">
           <label>Target s</label>
@@ -325,9 +357,122 @@ function renderSourceCounts() {
   const audioCards = [...$("audio-list").querySelectorAll(".audio-source-card")];
   const imported = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
   const prestimulus = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
-  const total = generated + imported + prestimulus;
-  $("source-counts").textContent = `${total} source${total === 1 ? "" : "s"}`;
-  $("source-counts").className = `status-label ${generated || imported ? "ready" : "required"}`;
+  const stimulusSources = generated + imported;
+  const sourceLabel = `${stimulusSources} source${stimulusSources === 1 ? "" : "s"}`;
+  const snippetLabel = prestimulus ? ` + ${prestimulus} snippet${prestimulus === 1 ? "" : "s"}` : "";
+  $("source-counts").textContent = `${sourceLabel}${snippetLabel}`;
+  $("source-counts").className = `status-label ${stimulusSources ? "ready" : "required"}`;
+}
+
+function stimulusTargetOptionsFromDesign(selected = "") {
+  const options = stimulusSourceOptionsFromDesign();
+  return renderOptionList(options, selected);
+}
+
+function stimulusSourceOptionsFromDesign() {
+  const options = [{ value: "", label: "Every stimulus source" }];
+  const seen = new Set([""]);
+  for (const noise of state.design.noises || []) {
+    addStimulusSourceOption(options, seen, noise.label || `${noiseTypeLabel(noise.noise_type)} noise`);
+  }
+  for (const audio of state.design.custom_looming_files || []) {
+    addStimulusSourceOption(options, seen, audio.label || audioRoleTitle(audio.render_mode || "preserve"));
+  }
+  return options;
+}
+
+function stimulusSourceOptionsFromDom() {
+  const options = [{ value: "", label: "Every stimulus source" }];
+  const seen = new Set([""]);
+  for (const card of $("noise-list").querySelectorAll(".noise-source-card")) {
+    const label = card.querySelector('[data-field="label"]')?.value || "Generated noise";
+    addStimulusSourceOption(options, seen, label);
+  }
+  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+    const role = card.querySelector('[data-field="audio_role"]')?.value;
+    if (role === "prestimulus") continue;
+    const label = card.querySelector('[data-field="label"]')?.value || audioRoleTitle(role);
+    addStimulusSourceOption(options, seen, label);
+  }
+  return options;
+}
+
+function addStimulusSourceOption(options, seen, label) {
+  const value = String(label || "").trim();
+  if (!value || seen.has(value)) return;
+  seen.add(value);
+  options.push({ value, label: value });
+}
+
+function stimulusPhaseOptions(selected = "") {
+  const phases = state.design.protocol?.respiratory_phases || ["Inhale", "Exhale"];
+  const options = [{ value: "", label: "Any phase" }];
+  const seen = new Set([""]);
+  for (const phase of phases) {
+    const value = String(phase || "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    options.push({ value, label: value });
+  }
+  return renderOptionList(options, selected);
+}
+
+function renderOptionList(options, selected = "") {
+  const selectedValue = String(selected || "");
+  return options
+    .map((item) => `<option value="${escapeAttr(item.value)}" ${item.value === selectedValue ? "selected" : ""}>${escapeHtml(item.label)}</option>`)
+    .join("");
+}
+
+function refreshAssemblyTargetOptions() {
+  const options = stimulusSourceOptionsFromDom();
+  for (const select of document.querySelectorAll('[data-field="target_source_label"]')) {
+    const selected = select.value || select.dataset.selectedTarget || "";
+    select.innerHTML = renderOptionList(options, selected);
+    select.value = options.some((item) => item.value === selected) ? selected : "";
+    select.dataset.selectedTarget = select.value;
+  }
+}
+
+function renderStimulusAssembly() {
+  const list = $("assembly-list");
+  if (!list) return;
+  const snippets = collectAssemblySnippets();
+  $("assembly-counts").textContent = `${snippets.length} snippet${snippets.length === 1 ? "" : "s"}`;
+  list.innerHTML = snippets.length
+    ? snippets.map(renderAssemblySnippet).join("")
+    : `<div class="assembly-empty">No assembly snippets.</div>`;
+}
+
+function collectAssemblySnippets() {
+  return [...$("audio-list").querySelectorAll(".audio-source-card")]
+    .filter((card) => card.querySelector('[data-field="audio_role"]')?.value === "prestimulus")
+    .map((card) => {
+      const field = (name) => card.querySelector(`[data-field="${name}"]`);
+      return {
+        label: field("label")?.value.trim() || "Instruction snippet",
+        placement: normalizeSnippetPlacement(field("placement")?.value),
+        target: field("target_source_label")?.value.trim() || "Every stimulus source",
+        phase: field("phase")?.value.trim(),
+        gap_s: Number(field("gap_s")?.value || 0),
+      };
+    });
+}
+
+function renderAssemblySnippet(snippet) {
+  const placement = snippet.placement === "after" ? "After" : "Before";
+  const phase = snippet.phase ? `, ${escapeHtml(snippet.phase)}` : "";
+  const gap = snippet.gap_s > 0 ? `, ${Number(snippet.gap_s).toFixed(2)} s gap` : "";
+  return `
+    <div class="assembly-item">
+      <strong>${escapeHtml(snippet.label)}</strong>
+      <span>${placement}: ${escapeHtml(snippet.target)}${phase}${gap}</span>
+    </div>
+  `;
+}
+
+function normalizeSnippetPlacement(value) {
+  return value === "after" ? "after" : "before";
 }
 
 function renderTrials() {
@@ -550,7 +695,11 @@ function collectAudioFiles() {
       path: field("path").value.trim(),
       target_duration_s: Number(field("target_duration_s").value || 4),
       render_mode: role === "spatialize" ? "spatialize" : "preserve",
-      gain: Number(field("gain").value || 1)
+      gain: Number(field("gain").value || 1),
+      placement: normalizeSnippetPlacement(field("placement")?.value),
+      target_source_label: field("target_source_label")?.value.trim() || "",
+      phase: field("phase")?.value.trim() || "",
+      gap_s: Math.max(0, Number(field("gap_s")?.value || 0))
     };
     if (role === "prestimulus") {
       result.prestimulus.push(item);
@@ -973,6 +1122,8 @@ function addNoiseRow(noiseType = "pink") {
     gain: 1
   });
   renderNoiseTable();
+  refreshAssemblyTargetOptions();
+  renderStimulusAssembly();
   renderSourceCounts();
 }
 
@@ -982,12 +1133,12 @@ function noiseTypeLabel(noiseType) {
 
 function audioRoleTitle(role) {
   if (role === "spatialize") return "Dry custom tone";
-  if (role === "prestimulus") return "Prestimulus cue";
+  if (role === "prestimulus") return "Instruction snippet";
   return "Already looming / control";
 }
 
 function openAudioPicker(renderMode) {
-  pendingAudioImportMode = renderMode === "spatialize" ? "spatialize" : "preserve";
+  pendingAudioImportMode = ["spatialize", "prestimulus"].includes(renderMode) ? renderMode : "preserve";
   $("audio-file-input").click();
 }
 
@@ -1002,15 +1153,26 @@ async function importAudioFromPicker() {
     body: JSON.stringify({
       filename: file.name,
       content_base64: contentBase64,
-      use: "looming",
-      render_mode: pendingAudioImportMode
+      use: pendingAudioImportMode === "prestimulus" ? "prestimulus" : "looming",
+      render_mode: pendingAudioImportMode === "spatialize" ? "spatialize" : "preserve",
+      placement: "before",
+      target_source_label: "",
+      phase: "",
+      gap_s: 0
     })
   });
-  state.design.custom_looming_files = state.design.custom_looming_files || [];
-  state.design.custom_looming_files.push(imported.audio);
+  if (pendingAudioImportMode === "prestimulus") {
+    state.design.prestimulus_files = state.design.prestimulus_files || [];
+    state.design.prestimulus_files.push({ ...imported.audio, placement: "before", target_source_label: "", phase: "", gap_s: 0 });
+  } else {
+    state.design.custom_looming_files = state.design.custom_looming_files || [];
+    state.design.custom_looming_files.push(imported.audio);
+  }
   renderAudioTable();
+  refreshAssemblyTargetOptions();
+  renderStimulusAssembly();
   renderSourceCounts();
-  showToast("Audio imported locally");
+  showToast(pendingAudioImportMode === "prestimulus" ? "Instruction snippet imported locally" : "Audio imported locally");
 }
 
 function fileToBase64(file) {
@@ -1025,8 +1187,11 @@ function fileToBase64(file) {
   });
 }
 
-function removeRowFromButton(button) {
-  button.closest("tr").remove();
+function removeSourceCard(button) {
+  const card = button.closest(".source-card");
+  if (card) card.remove();
+  refreshAssemblyTargetOptions();
+  renderStimulusAssembly();
   renderSourceCounts();
 }
 
@@ -1091,6 +1256,7 @@ function wireEvents() {
   });
   $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
   $("import-audio-preserve").addEventListener("click", () => openAudioPicker("preserve"));
+  $("import-audio-prestimulus").addEventListener("click", () => openAudioPicker("prestimulus"));
   $("audio-file-input").addEventListener("change", () => importAudioFromPicker().catch(reportError));
   $("reset-camera").addEventListener("click", () => {
     const frame = $("trajectory-frame");
@@ -1134,20 +1300,36 @@ function wireEvents() {
   });
   document.addEventListener("click", (event) => {
     if (event.target.matches("[data-remove-noise], [data-remove-audio]")) {
-      removeRowFromButton(event.target);
+      removeSourceCard(event.target);
+    }
+  });
+  document.addEventListener("input", (event) => {
+    const card = event.target.closest?.(".source-card");
+    if (!card) return;
+    if (event.target.matches('[data-field="label"]')) {
+      refreshAssemblyTargetOptions();
+    }
+    if (card.classList.contains("audio-source-card")) {
+      renderStimulusAssembly();
     }
   });
   document.addEventListener("change", (event) => {
     if (event.target.matches('[data-field="audio_role"]')) {
       const card = event.target.closest(".audio-source-card");
       const title = card?.querySelector(".source-card-heading strong");
+      if (card) card.dataset.audioRole = event.target.value;
       if (title) title.textContent = audioRoleTitle(event.target.value);
+      refreshAssemblyTargetOptions();
+      renderStimulusAssembly();
       renderSourceCounts();
     }
     if (event.target.matches('.noise-source-card [data-field="noise_type"]')) {
       const card = event.target.closest(".noise-source-card");
       const title = card?.querySelector(".source-card-heading strong");
       if (title) title.textContent = `${noiseTypeLabel(event.target.value)} noise`;
+    }
+    if (event.target.closest?.(".audio-source-card")) {
+      renderStimulusAssembly();
     }
   });
 }
