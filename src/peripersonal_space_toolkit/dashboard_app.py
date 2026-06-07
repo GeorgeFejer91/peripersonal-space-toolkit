@@ -282,7 +282,16 @@ class DashboardController:
                 duration_s = float(audio_file_summary(path)["duration_s"])
             except Exception:
                 duration_s = 4.0
-        audio = AudioFileSpec(label=label, path=str(path), target_duration_s=duration_s)
+        render_mode = str(payload.get("render_mode") or "preserve").strip().lower()
+        if render_mode not in {"spatialize", "preserve"}:
+            render_mode = "preserve"
+        audio = AudioFileSpec(
+            label=label,
+            path=str(path),
+            target_duration_s=duration_s,
+            render_mode=render_mode,
+            gain=_float(payload.get("gain"), 1.0),
+        )
         return {
             "audio": asdict(audio),
             "local_only": True,

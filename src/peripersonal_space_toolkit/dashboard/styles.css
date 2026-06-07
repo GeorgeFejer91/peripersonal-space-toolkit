@@ -505,6 +505,46 @@ select:focus {
   font-weight: 700;
 }
 
+.source-module {
+  margin: 12px 0 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.source-module-heading {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-weight: 700;
+}
+
+.source-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.source-action {
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  text-align: left;
+}
+
+.source-action strong {
+  font-size: 13px;
+}
+
+.source-action span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .toolbar-actions {
   display: flex;
   gap: 8px;
@@ -545,6 +585,11 @@ select:focus {
 .data-table .remove-cell {
   width: 54px;
   text-align: right;
+}
+
+#audio-table th:nth-child(3),
+#audio-table td:nth-child(3) {
+  width: 30%;
 }
 
 .summary-text {
@@ -785,6 +830,10 @@ select:focus {
 
   .grid,
   .table-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .source-action-grid {
     grid-template-columns: 1fr;
   }
 

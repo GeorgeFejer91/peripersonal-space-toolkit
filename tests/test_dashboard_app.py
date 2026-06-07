@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 
 from peripersonal_space_toolkit import dashboard_app
 from peripersonal_space_toolkit.dashboard_app import DashboardController, create_app
-from peripersonal_space_toolkit.design import ProtocolSpec, default_design, save_design
-from peripersonal_space_toolkit.render_backend import RenderResult
+from peripersonal_space_toolkit.design import AudioFileSpec, ProtocolSpec, default_design, save_design
+from peripersonal_space_toolkit.render_backend import RenderResult, build_render_config
 
 
 def _compact_design():
@@ -95,6 +95,13 @@ def test_dashboard_static_assets_are_packaged():
     assert 'src="app.js"' in html
     assert 'src="../viewer/index.html"' in html
     assert 'id="audio-file-input"' in html
+    assert 'id="import-audio-spatialize"' in html
+    assert 'id="import-audio-preserve"' in html
+    assert 'id="source-counts"' in html
+    assert "Dry Custom Tone" in html
+    assert "Already Looming / Control" in html
+    assert "White, pink, blue, violet, brown" in html
+    assert "IMPORTED_AUDIO_HANDLING" in dashboard_files.joinpath("app.js").read_text(encoding="utf-8")
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js
@@ -186,6 +193,7 @@ def test_dashboard_import_audio_is_local_only(tmp_path: Path):
         "filename": source.name,
         "content_base64": base64.b64encode(source.read_bytes()).decode("ascii"),
         "use": "looming",
+        "render_mode": "spatialize",
     }
 
     imported = client.post("/api/audio/import", json=payload).json()
@@ -197,6 +205,32 @@ def test_dashboard_import_audio_is_local_only(tmp_path: Path):
     assert stored.parent == tmp_path / "imports"
     assert imported["audio"]["label"] == "manual_loom"
     assert imported["audio"]["target_duration_s"] > 0
+    assert imported["audio"]["render_mode"] == "spatialize"
+
+
+def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):
+    source = tmp_path / "dry_tone.wav"
+    sf.write(source, np.zeros((441, 1), dtype=np.float32), 44100)
+    design = _compact_design()
+    design.noises = []
+    design.custom_looming_files = [
+        AudioFileSpec(
+            label="Dry local tone",
+            path=str(source),
+            target_duration_s=4.0,
+            render_mode="spatialize",
+            gain=0.75,
+        )
+    ]
+
+    config = build_render_config(design, seed=20250604, output_dir=tmp_path)
+
+    assert config["source"]["type"] == "imported_audio"
+    imported = config["source"]["noises"][0]
+    assert imported["source_kind"] == "imported_audio"
+    assert imported["source_render_mode"] == "spatialize"
+    assert imported["path"] == str(source)
+    assert imported["gain"] == 0.75
 
 
 def test_dashboard_render_job_uses_existing_render_backend(tmp_path: Path, monkeypatch):

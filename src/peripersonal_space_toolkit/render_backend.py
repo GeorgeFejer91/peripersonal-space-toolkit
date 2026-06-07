@@ -137,6 +137,7 @@ def _noise_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                     "source_kind": "imported_audio",
                     "path": source.get("source_path", ""),
                     "target_duration_s": source.get("target_duration_s", 0.0),
+                    "source_render_mode": source.get("source_render_mode", "preserve"),
                 }
             )
         rows.append(row)
@@ -206,6 +207,11 @@ def _generate_noise(noise_type: str, samples: int, sample_rate: int, seed: int) 
         freqs = np.fft.rfftfreq(samples, 1.0 / sample_rate)
         freqs[0] = freqs[1] if len(freqs) > 1 else 1.0
         result = np.fft.irfft(spectrum * np.sqrt(freqs), n=samples)
+    elif noise == "violet":
+        spectrum = np.fft.rfft(white)
+        freqs = np.fft.rfftfreq(samples, 1.0 / sample_rate)
+        freqs[0] = freqs[1] if len(freqs) > 1 else 1.0
+        result = np.fft.irfft(spectrum * freqs, n=samples)
     elif noise == "brown":
         result = np.cumsum(white)
     else:
@@ -273,6 +279,7 @@ def _render_imported_audio_source(
         "noise_label": source["label"],
         "noise_type": source["noise_type"],
         "source_kind": "imported_audio",
+        "source_render_mode": source.get("source_render_mode", "preserve"),
         "source_path": str(repo_relative_path(str(source.get("path", "")))),
         "source_sample_rate": source_rate,
         "source_channels": source_channels,
@@ -295,6 +302,17 @@ def _render_imported_audio_source(
             "files with 3+ channels preserve channel 3 as tactile."
         ),
     }
+
+
+def _imported_audio_mono_source(source: dict[str, Any], sample_rate: int, total_samples: int) -> tuple["Any", int, int]:
+    import numpy as np
+
+    data, source_rate, source_channels = _read_imported_audio_source(source, sample_rate, total_samples)
+    if data.shape[1] == 1:
+        dry = data[:, 0]
+    else:
+        dry = np.mean(data[:, :2], axis=1)
+    return dry, source_rate, source_channels
 
 
 def _load_sofa_hrirs(sofa_file: str) -> dict[str, Any]:
@@ -384,6 +402,57 @@ def _add_tactile_channel(config: dict[str, Any], sample_rate: int, samples: int)
     if peak > 1.0:
         channel /= peak
     return channel
+
+
+def _spatialize_moving_source(
+    dry: "Any",
+    source: dict[str, Any],
+    *,
+    config: dict[str, Any],
+    sofa: dict[str, Any],
+    sample_rate: int,
+    total_samples: int,
+    frame_samples: int,
+    hop_samples: int,
+    window: "Any",
+) -> tuple["Any", set[int]]:
+    import numpy as np
+    from scipy import signal
+
+    hrir_len = int(sofa["hrirs"].shape[-1])
+    stereo = np.zeros((total_samples + hrir_len + frame_samples, 2), dtype=float)
+    used_hrir_indices: set[int] = set()
+
+    for start in range(0, total_samples, hop_samples):
+        stop = min(total_samples, start + frame_samples)
+        valid = stop - start
+        if valid <= 0:
+            continue
+        frame = np.zeros(frame_samples, dtype=float)
+        frame[:valid] = dry[start:stop]
+        center_time = (start + valid / 2.0) / sample_rate
+        point = _sample_from_config(config, center_time)
+        spherical = cartesian_to_spherical(point["x_m"], point["y_m"], point["z_m"])
+        hrir_index = _nearest_hrir_index(
+            sofa["positions"],
+            spherical["azimuth_deg"],
+            spherical["elevation_deg"],
+        )
+        used_hrir_indices.add(hrir_index)
+        radius = max(float(point["radius_m"]), 0.05)
+        distance_gain = 1.0 / radius if config["source"].get("gain_law") else 1.0
+        frame *= window * float(source.get("gain", 1.0)) * distance_gain
+        left = signal.fftconvolve(frame, sofa["hrirs"][hrir_index, 0, :], mode="full")
+        right = signal.fftconvolve(frame, sofa["hrirs"][hrir_index, 1, :], mode="full")
+        end = start + len(left)
+        stereo[start:end, 0] += left
+        stereo[start:end, 1] += right
+
+    stereo = stereo[:total_samples, :]
+    audio_peak = float(np.max(np.abs(stereo))) if stereo.size else 0.0
+    if audio_peak > 0:
+        stereo = stereo / audio_peak * OUTPUT_AUDIO_PEAK_NORMALIZATION
+    return stereo, used_hrir_indices
 
 
 def build_render_config(
@@ -543,6 +612,7 @@ def write_render_qc(path: Path, rows: list[dict[str, Any]]) -> None:
         "noise_label",
         "noise_type",
         "source_kind",
+        "source_render_mode",
         "source_path",
         "source_sample_rate",
         "source_channels",
@@ -624,11 +694,14 @@ def write_trajectory_qc(path: Path, config: dict[str, Any]) -> None:
 def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, qc_path: Path) -> list[Path]:
     import numpy as np
     import soundfile as sf
-    from scipy import signal
 
     sample_rate = int(config["source"]["sample_rate"])
-    procedural_sources = [source for source in config["source"]["noises"] if source.get("source_kind") != "imported_audio"]
-    sofa = _load_sofa_hrirs(config["source"]["sofa_file"]) if procedural_sources else None
+    spatialized_sources = [
+        source
+        for source in config["source"]["noises"]
+        if source.get("source_kind") != "imported_audio" or source.get("source_render_mode") == "spatialize"
+    ]
+    sofa = _load_sofa_hrirs(config["source"]["sofa_file"]) if spatialized_sources else None
     if sofa is not None and sofa["sample_rate"] != sample_rate:
         raise RuntimeError(
             f"SOFA sample rate {sofa['sample_rate']} Hz does not match render sample rate {sample_rate} Hz."
@@ -637,7 +710,6 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
     total_samples = max(1, int(round(total_duration * sample_rate)))
     frame_samples = max(16, int(round(float(config["renderer"]["frame_ms"]) / 1000.0 * sample_rate)))
     hop_samples = max(1, int(round(float(config["renderer"]["hop_ms"]) / 1000.0 * sample_rate)))
-    hrir_len = int(sofa["hrirs"].shape[-1]) if sofa is not None else 0
     window = np.sqrt(np.hanning(frame_samples))
     if not np.any(window):
         window = np.ones(frame_samples, dtype=float)
@@ -646,7 +718,10 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
     wav_paths: list[Path] = []
 
     for noise_index, noise in enumerate(config["source"]["noises"]):
-        if noise.get("source_kind") == "imported_audio":
+        source_kind = noise.get("source_kind", "procedural_noise")
+        source_render_mode = noise.get("source_render_mode", "preserve")
+        imported_metadata: dict[str, Any] = {}
+        if source_kind == "imported_audio" and source_render_mode != "spatialize":
             wav_path, row = _render_imported_audio_source(
                 noise,
                 config=config,
@@ -658,40 +733,28 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
             wav_paths.append(wav_path)
             rows.append(row)
             continue
-        dry_seed = int(config["source"]["seed"]) + noise_index * 1009
-        dry = _generate_noise(noise["noise_type"], total_samples, sample_rate, dry_seed)
-        stereo = np.zeros((total_samples + hrir_len + frame_samples, 2), dtype=float)
-        used_hrir_indices: set[int] = set()
-
-        for start in range(0, total_samples, hop_samples):
-            stop = min(total_samples, start + frame_samples)
-            valid = stop - start
-            if valid <= 0:
-                continue
-            frame = np.zeros(frame_samples, dtype=float)
-            frame[:valid] = dry[start:stop]
-            center_time = (start + valid / 2.0) / sample_rate
-            point = _sample_from_config(config, center_time)
-            spherical = cartesian_to_spherical(point["x_m"], point["y_m"], point["z_m"])
-            hrir_index = _nearest_hrir_index(
-                sofa["positions"],
-                spherical["azimuth_deg"],
-                spherical["elevation_deg"],
-            )
-            used_hrir_indices.add(hrir_index)
-            radius = max(float(point["radius_m"]), 0.05)
-            distance_gain = 1.0 / radius if config["source"].get("gain_law") else 1.0
-            frame *= window * float(noise.get("gain", 1.0)) * distance_gain
-            left = signal.fftconvolve(frame, sofa["hrirs"][hrir_index, 0, :], mode="full")
-            right = signal.fftconvolve(frame, sofa["hrirs"][hrir_index, 1, :], mode="full")
-            end = start + len(left)
-            stereo[start:end, 0] += left
-            stereo[start:end, 1] += right
-
-        stereo = stereo[:total_samples, :]
-        audio_peak = float(np.max(np.abs(stereo))) if stereo.size else 0.0
-        if audio_peak > 0:
-            stereo = stereo / audio_peak * OUTPUT_AUDIO_PEAK_NORMALIZATION
+        if source_kind == "imported_audio":
+            dry, source_rate, source_channels = _imported_audio_mono_source(noise, sample_rate, total_samples)
+            imported_metadata = {
+                "source_render_mode": "spatialize",
+                "source_path": str(repo_relative_path(str(noise.get("path", "")))),
+                "source_sample_rate": source_rate,
+                "source_channels": source_channels,
+            }
+        else:
+            dry_seed = int(config["source"]["seed"]) + noise_index * 1009
+            dry = _generate_noise(noise["noise_type"], total_samples, sample_rate, dry_seed)
+        stereo, used_hrir_indices = _spatialize_moving_source(
+            dry,
+            noise,
+            config=config,
+            sofa=sofa,
+            sample_rate=sample_rate,
+            total_samples=total_samples,
+            frame_samples=frame_samples,
+            hop_samples=hop_samples,
+            window=window,
+        )
         rendered = np.column_stack([stereo, tactile])
         first_half = stereo[: total_samples // 2, :]
         second_half = stereo[total_samples // 2 :, :]
@@ -710,7 +773,8 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
                 "status": "rendered_reference",
                 "noise_label": noise["label"],
                 "noise_type": noise["noise_type"],
-                "source_kind": noise.get("source_kind", "procedural_noise"),
+                "source_kind": source_kind,
+                **imported_metadata,
                 "duration_s": f"{total_samples / sample_rate:.6f}",
                 "sample_rate": sample_rate,
                 "channels": 3,

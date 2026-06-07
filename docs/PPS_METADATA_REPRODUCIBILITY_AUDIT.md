@@ -29,12 +29,12 @@ Holmes et al. (2020) remains the systematic anchor for this audit because it rev
 | study template preload | implemented | Lets users load published paradigms as starting points. |
 | SOFA/HRIR file path | implemented | Enables reproducible spatial audio rendering. |
 | noise label | implemented | Names condition-level auditory stimuli. |
-| noise type | implemented | Supports pink, blue, white, and brown noise variants. |
+| noise type | implemented | Supports pink, blue, violet, white, and brown noise variants. |
 | auditory azimuth | implemented | Required for front/rear/left/right and lateral PPS designs. |
 | auditory elevation | implemented | Required for 3D PPS designs such as Lerner et al. |
 | auditory gain | implemented | Encodes relative intensity between sound conditions. |
 | snap noise locations to SOFA grid | implemented | Prevents impossible or unsupported HRIR coordinates. |
-| custom looming audio file | implemented | Lets users preload published or externally generated looming stimuli. |
+| custom looming audio file | implemented | Lets users import local dry tones for trajectory spatialization or preserve published/control looming stimuli as already-baked audio. |
 | custom prestimulus audio file | implemented | Lets users preload instruction, pre-cue, or baseline/prestimulus files. |
 | target imported audio duration | implemented | Useful for enforcing fixed 4 s imported chunks. |
 | trajectory start radius | implemented | Defines far/initial sound distance. |

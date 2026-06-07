@@ -67,9 +67,9 @@ without a separate Python console window.
 
 The designer currently covers:
 
-- procedural noise definitions for white, pink, blue, and brown noise
+- procedural noise definitions for white, pink, blue, violet, and brown noise
 - per-noise azimuth, elevation, and gain
-- imported custom looming stimulus files, stored locally as named audio sources with target duration
+- imported custom audio files, stored locally as named sources with target duration and explicit handling: dry tone to be spatialized along the trajectory, or already looming/control audio to preserve as-is
 - custom prestimulus files, such as 4-second breathing or instruction chunks, stored as named preload paths with target duration
 - `Starting Point` and `End Point` panels where each endpoint is defined by distance from the listener in cm and full 0-360 degree rotation around the listener
 - under-the-hood start/end X/Y/Z sound-source coordinates relative to the listener, derived from those endpoint controls and stored for trajectory generation/export

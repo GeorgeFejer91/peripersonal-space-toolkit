@@ -32,7 +32,13 @@ const PROCEDURAL_NOISE_TYPES = [
   { value: "white", label: "White" },
   { value: "pink", label: "Pink" },
   { value: "blue", label: "Blue" },
+  { value: "violet", label: "Violet" },
   { value: "brown", label: "Brown" }
+];
+const IMPORTED_AUDIO_HANDLING = [
+  { value: "spatialize", label: "Dry tone -> make looming" },
+  { value: "preserve", label: "Already looming / control" },
+  { value: "prestimulus", label: "Prestimulus cue" }
 ];
 const TRAJECTORY_FIELD_IDS = [
   "start-distance",
@@ -47,6 +53,7 @@ const TRAJECTORY_FIELD_IDS = [
 const $ = (id) => document.getElementById(id);
 let apiBase = "";
 let templateLoadInFlight = false;
+let pendingAudioImportMode = "preserve";
 
 async function api(path, options = {}) {
   let response;
@@ -210,6 +217,7 @@ function renderStimulus() {
   syncPreviewModeControls($("preview-mode").value || "2d");
   renderNoiseTable();
   renderAudioTable();
+  renderSourceCounts();
 }
 
 function renderNoiseTable() {
@@ -237,24 +245,35 @@ function renderAudioTable() {
   const body = $("audio-table").querySelector("tbody");
   body.innerHTML = "";
   const rows = [
-    ...(state.design.custom_looming_files || []).map((item) => ({ ...item, use: "looming" })),
-    ...(state.design.prestimulus_files || []).map((item) => ({ ...item, use: "prestimulus" }))
+    ...(state.design.custom_looming_files || []).map((item) => ({ ...item, audio_role: item.render_mode || "preserve" })),
+    ...(state.design.prestimulus_files || []).map((item) => ({ ...item, audio_role: "prestimulus" }))
   ];
   for (const audio of rows) {
     const row = body.insertRow();
+    const role = String(audio.audio_role || audio.use || audio.render_mode || "preserve").toLowerCase();
     row.innerHTML = `
       <td>
-        <select data-field="use">
-          <option value="looming" ${audio.use === "looming" ? "selected" : ""}>looming source</option>
-          <option value="prestimulus" ${audio.use === "prestimulus" ? "selected" : ""}>prestimulus</option>
+        <select data-field="audio_role">
+          ${IMPORTED_AUDIO_HANDLING.map((item) => `<option value="${item.value}" ${item.value === role ? "selected" : ""}>${item.label}</option>`).join("")}
         </select>
       </td>
       <td><input data-field="label" value="${escapeAttr(audio.label || "")}"></td>
       <td><input data-field="path" value="${escapeAttr(audio.path || "")}"></td>
       <td><input data-field="target_duration_s" type="number" min="0.1" step="0.1" value="${Number(audio.target_duration_s || 4)}"></td>
+      <td><input data-field="gain" type="number" min="0.01" step="0.05" value="${Number(audio.gain || 1)}"></td>
       <td class="remove-cell"><button type="button" data-remove-audio>Remove</button></td>
     `;
   }
+}
+
+function renderSourceCounts() {
+  const generated = $("noise-table").querySelectorAll("tbody tr").length;
+  const audioRows = [...$("audio-table").querySelectorAll("tbody tr")];
+  const imported = audioRows.filter((row) => row.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
+  const prestimulus = audioRows.filter((row) => row.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
+  const total = generated + imported + prestimulus;
+  $("source-counts").textContent = `${total} source${total === 1 ? "" : "s"}`;
+  $("source-counts").className = `status-label ${generated || imported ? "ready" : "required"}`;
 }
 
 function renderTrials() {
@@ -471,12 +490,15 @@ function collectAudioFiles() {
   const result = { looming: [], prestimulus: [] };
   for (const row of $("audio-table").querySelectorAll("tbody tr")) {
     const field = (name) => row.querySelector(`[data-field="${name}"]`);
+    const role = field("audio_role").value;
     const item = {
       label: field("label").value.trim() || "Audio file",
       path: field("path").value.trim(),
-      target_duration_s: Number(field("target_duration_s").value || 4)
+      target_duration_s: Number(field("target_duration_s").value || 4),
+      render_mode: role === "spatialize" ? "spatialize" : "preserve",
+      gain: Number(field("gain").value || 1)
     };
-    if (field("use").value === "prestimulus") {
+    if (role === "prestimulus") {
       result.prestimulus.push(item);
     } else {
       result.looming.push(item);
@@ -895,16 +917,25 @@ function addNoiseRow() {
     gain: 1
   });
   renderNoiseTable();
+  renderSourceCounts();
 }
 
-function addAudioRow() {
+function addAudioRow(renderMode = "preserve") {
   state.design.custom_looming_files = state.design.custom_looming_files || [];
   state.design.custom_looming_files.push({
-    label: "Custom looming",
+    label: renderMode === "spatialize" ? "Dry custom tone" : "Already looming audio",
     path: "",
-    target_duration_s: 4
+    target_duration_s: 4,
+    render_mode: renderMode === "spatialize" ? "spatialize" : "preserve",
+    gain: 1
   });
   renderAudioTable();
+  renderSourceCounts();
+}
+
+function openAudioPicker(renderMode) {
+  pendingAudioImportMode = renderMode === "spatialize" ? "spatialize" : "preserve";
+  $("audio-file-input").click();
 }
 
 async function importAudioFromPicker() {
@@ -918,12 +949,14 @@ async function importAudioFromPicker() {
     body: JSON.stringify({
       filename: file.name,
       content_base64: contentBase64,
-      use: "looming"
+      use: "looming",
+      render_mode: pendingAudioImportMode
     })
   });
   state.design.custom_looming_files = state.design.custom_looming_files || [];
   state.design.custom_looming_files.push(imported.audio);
   renderAudioTable();
+  renderSourceCounts();
   showToast("Audio imported locally");
 }
 
@@ -941,6 +974,7 @@ function fileToBase64(file) {
 
 function removeRowFromButton(button) {
   button.closest("tr").remove();
+  renderSourceCounts();
 }
 
 function delay(ms) {
@@ -997,8 +1031,10 @@ function wireEvents() {
   $("stress-action").addEventListener("click", () => stressAudio().catch(reportError));
   $("focus-action").addEventListener("click", () => startFocus().catch(reportError));
   $("add-noise").addEventListener("click", addNoiseRow);
-  $("add-audio").addEventListener("click", addAudioRow);
-  $("import-audio").addEventListener("click", () => $("audio-file-input").click());
+  $("add-audio-spatialize").addEventListener("click", () => addAudioRow("spatialize"));
+  $("add-audio-preserve").addEventListener("click", () => addAudioRow("preserve"));
+  $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
+  $("import-audio-preserve").addEventListener("click", () => openAudioPicker("preserve"));
   $("audio-file-input").addEventListener("change", () => importAudioFromPicker().catch(reportError));
   $("reset-camera").addEventListener("click", () => {
     const frame = $("trajectory-frame");
@@ -1043,6 +1079,11 @@ function wireEvents() {
   document.addEventListener("click", (event) => {
     if (event.target.matches("[data-remove-noise], [data-remove-audio]")) {
       removeRowFromButton(event.target);
+    }
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target.matches('[data-field="audio_role"]')) {
+      renderSourceCounts();
     }
   });
 }

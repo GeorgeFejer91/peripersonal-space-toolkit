@@ -13,8 +13,9 @@ from typing import Any
 import numpy as np
 
 
-SUPPORTED_NOISE_TYPES = ("pink", "blue", "white", "brown")
+SUPPORTED_NOISE_TYPES = ("pink", "blue", "violet", "white", "brown")
 CUSTOM_AUDIO_NOISE_TYPE = "custom_audio"
+SUPPORTED_IMPORTED_AUDIO_RENDER_MODES = ("spatialize", "preserve")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
@@ -36,6 +37,8 @@ class AudioFileSpec:
     label: str
     path: str
     target_duration_s: float = 4.0
+    render_mode: str = "preserve"
+    gain: float = 1.0
 
 
 @dataclass
@@ -314,6 +317,10 @@ def validate_design(design: StimulusDesign) -> list[str]:
                 warnings.append(f"{asset.label} file was not found: {asset.path}")
             if asset.target_duration_s <= 0:
                 warnings.append(f"{asset.label} target duration must be positive.")
+            if asset.render_mode not in SUPPORTED_IMPORTED_AUDIO_RENDER_MODES:
+                warnings.append(f"{asset.label} imported audio render mode is unsupported: {asset.render_mode}")
+            if asset.gain <= 0:
+                warnings.append(f"{asset.label} gain must be positive.")
 
     t = design.trajectory
     if t.path_direction not in SUPPORTED_DIRECTIONS:
@@ -522,8 +529,10 @@ def protocol_sound_sources(design: StimulusDesign) -> list[dict[str, Any]]:
             "noise_type": CUSTOM_AUDIO_NOISE_TYPE,
             "azimuth_deg": "",
             "elevation_deg": "",
+            "gain": asset.gain,
             "source_path": asset.path,
             "target_duration_s": asset.target_duration_s,
+            "source_render_mode": asset.render_mode,
         }
         for asset in design.custom_looming_files
         if asset.label.strip() or asset.path.strip()

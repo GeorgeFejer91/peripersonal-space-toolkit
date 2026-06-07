@@ -54,6 +54,8 @@ The same dashboard can be published as a GitHub Pages static site from the repos
 
 The browser dashboard is an orchestrator only. It must not upload stimulus files, participant data, generated WAVs, or experiment artifacts to an online service. File-selection/import controls should hand the chosen file to the local companion backend, which stores local copies under ignored local paths and then uses those local paths in the design/render/session pipeline.
 
+Imported dashboard audio sources must distinguish dry tones that the backend spatializes along the selected trajectory from already looming/control audio that should be preserved as baked local audio.
+
 The PySide6/Qt designer remains available as `pps-design` / `windows\Launch_Stimulus_Designer.bat` for comparison and fallback. Keep its nested `QSplitter` workspaces and embedded local Three.js trajectory viewer working, but new researcher-facing workflow polish should prefer the HTML dashboard unless the user asks for Qt specifically.
 
 Published-study profiles should look and behave like paper-level preloads, not anonymous parameter presets. The GUI should show citation-like author/year/title labels, keep the current/selected paper annotation visible, and allow BibTeX/CSL JSON citation export from template metadata.

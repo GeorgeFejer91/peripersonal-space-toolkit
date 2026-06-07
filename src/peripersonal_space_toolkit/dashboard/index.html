@@ -108,15 +108,35 @@
               </div>
             </div>
 
-            <div class="table-toolbar">
-              <span>Procedural noise sources</span>
-              <button id="add-noise" type="button">Add Noise</button>
+            <div class="source-module" aria-label="Noise and audio source selection">
+              <div class="source-module-heading">
+                <span>Noise Selection</span>
+                <span id="source-counts" class="status-label">0 sources</span>
+              </div>
+              <div class="source-action-grid">
+                <button id="add-noise" type="button" class="source-action">
+                  <strong>Generated Noise</strong>
+                  <span>White, pink, blue, violet, brown</span>
+                </button>
+                <button id="import-audio-spatialize" type="button" class="source-action">
+                  <strong>Dry Custom Tone</strong>
+                  <span>Make looming with trajectory</span>
+                </button>
+                <button id="import-audio-preserve" type="button" class="source-action">
+                  <strong>Already Looming / Control</strong>
+                  <span>Preserve local audio</span>
+                </button>
+              </div>
             </div>
-            <table class="data-table" id="noise-table">
+
+            <div class="table-toolbar">
+              <span>Generated noise sources</span>
+            </div>
+            <table class="data-table source-table" id="noise-table">
               <thead>
                 <tr>
                   <th>Label</th>
-                  <th>Type</th>
+                  <th>Noise color</th>
                   <th>Azimuth</th>
                   <th>Elevation</th>
                   <th>Gain</th>
@@ -127,20 +147,21 @@
             </table>
 
             <div class="table-toolbar">
-              <span>Imported audio sources</span>
+              <span>Custom local audio sources</span>
               <div class="toolbar-actions">
-                <button id="import-audio" type="button">Import Audio</button>
-                <button id="add-audio" type="button">Add Path</button>
+                <button id="add-audio-spatialize" type="button">Add Dry Path</button>
+                <button id="add-audio-preserve" type="button">Add Preserve Path</button>
               </div>
             </div>
             <input id="audio-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/mpeg,audio/mp3" hidden>
-            <table class="data-table" id="audio-table">
+            <table class="data-table source-table" id="audio-table">
               <thead>
                 <tr>
-                  <th>Role</th>
+                  <th>Source handling</th>
                   <th>Label</th>
-                  <th>Path</th>
+                  <th>Local path</th>
                   <th>Target s</th>
+                  <th>Gain</th>
                   <th></th>
                 </tr>
               </thead>
