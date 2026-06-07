@@ -17,6 +17,7 @@ SUPPORTED_NOISE_TYPES = ("pink", "blue", "violet", "white", "brown")
 CUSTOM_AUDIO_NOISE_TYPE = "custom_audio"
 SUPPORTED_IMPORTED_AUDIO_RENDER_MODES = ("spatialize", "preserve")
 SUPPORTED_STIMULUS_SNIPPET_PLACEMENTS = ("before", "after")
+SUPPORTED_STIMULUS_MOTION_MODES = ("looming", "stationary")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
@@ -44,6 +45,8 @@ class AudioFileSpec:
     target_source_label: str = ""
     phase: str = ""
     gap_s: float = 0.0
+    sequence_order: int = 0
+    motion_mode: str = "looming"
 
 
 @dataclass
@@ -53,6 +56,8 @@ class NoiseDefinition:
     azimuth_deg: float = 0.0
     elevation_deg: float = 0.0
     gain: float = 1.0
+    sequence_order: int = 0
+    motion_mode: str = "looming"
 
 
 @dataclass
@@ -147,20 +152,22 @@ def design_to_dict(design: StimulusDesign) -> dict[str, Any]:
     return asdict(design)
 
 
-def _audio_file_specs_from_dicts(items: list[Any]) -> list[AudioFileSpec]:
+def _audio_file_specs_from_dicts(items: list[Any], *, default_motion_mode: str = "looming") -> list[AudioFileSpec]:
     specs: list[AudioFileSpec] = []
     for item in items:
         if isinstance(item, str):
-            specs.append(AudioFileSpec(label=Path(item).stem, path=item))
+            specs.append(AudioFileSpec(label=Path(item).stem, path=item, motion_mode=default_motion_mode))
         else:
-            specs.append(AudioFileSpec(**item))
+            data = dict(item)
+            data.setdefault("motion_mode", default_motion_mode)
+            specs.append(AudioFileSpec(**data))
     return specs
 
 
 def design_from_dict(data: dict[str, Any]) -> StimulusDesign:
     noises = [NoiseDefinition(**item) for item in data.get("noises", [])]
-    custom_looming_files = _audio_file_specs_from_dicts(data.get("custom_looming_files", []))
-    prestimulus_files = _audio_file_specs_from_dicts(data.get("prestimulus_files", []))
+    custom_looming_files = _audio_file_specs_from_dicts(data.get("custom_looming_files", []), default_motion_mode="looming")
+    prestimulus_files = _audio_file_specs_from_dicts(data.get("prestimulus_files", []), default_motion_mode="stationary")
     trajectory_data = dict(data.get("trajectory", {}))
     if "coordinate_mode" not in trajectory_data and any(
         key in trajectory_data
@@ -308,6 +315,10 @@ def validate_design(design: StimulusDesign) -> list[str]:
             warnings.append(f"Elevation for {noise.label} should be between -90 and 90 degrees.")
         if noise.gain <= 0:
             warnings.append(f"Gain for {noise.label} must be positive.")
+        if noise.sequence_order < 0:
+            warnings.append(f"{noise.label} sequence order cannot be negative.")
+        if noise.motion_mode not in SUPPORTED_STIMULUS_MOTION_MODES:
+            warnings.append(f"{noise.label} stimulus motion mode is unsupported: {noise.motion_mode}")
 
     for label, files in [
         ("custom looming", design.custom_looming_files),
@@ -330,6 +341,10 @@ def validate_design(design: StimulusDesign) -> list[str]:
                 warnings.append(f"{asset.label} stimulus snippet placement is unsupported: {asset.placement}")
             if asset.gap_s < 0:
                 warnings.append(f"{asset.label} stimulus snippet gap cannot be negative.")
+            if asset.sequence_order < 0:
+                warnings.append(f"{asset.label} sequence order cannot be negative.")
+            if asset.motion_mode not in SUPPORTED_STIMULUS_MOTION_MODES:
+                warnings.append(f"{asset.label} stimulus motion mode is unsupported: {asset.motion_mode}")
 
     t = design.trajectory
     if t.path_direction not in SUPPORTED_DIRECTIONS:

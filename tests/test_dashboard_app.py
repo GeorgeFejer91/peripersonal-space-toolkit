@@ -103,6 +103,9 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="noise-list"' in html
     assert 'id="audio-list"' in html
     assert 'id="assembly-list"' in html
+    assert 'id="builder-add-noise"' in html
+    assert 'id="builder-add-audio"' in html
+    assert 'id="builder-noise-type"' in html
     assert 'id="source-counts"' in html
     assert 'id="add-audio-spatialize"' not in html
     assert 'id="add-audio-preserve"' not in html
@@ -114,9 +117,11 @@ def test_dashboard_static_assets_are_packaged():
     assert "IMPORTED_AUDIO_HANDLING" in app_js
     assert "PROCEDURAL_NOISE_TYPES" in app_js
     assert "STIMULUS_SNIPPET_PLACEMENTS" in app_js
+    assert "STIMULUS_MOTION_MODES" in app_js
     assert "noise-source-card" in app_js
     assert "audio-source-card" in app_js
     assert "assembly-list" in app_js
+    assert "dragstart" in app_js
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js
@@ -231,6 +236,8 @@ def test_dashboard_import_audio_is_local_only(tmp_path: Path):
         "target_source_label": "Manual pink",
         "phase": "Inhale",
         "gap_s": 0.25,
+        "sequence_order": 3,
+        "motion_mode": "stationary",
     }
     snippet = client.post("/api/audio/import", json=snippet_payload).json()
 
@@ -239,6 +246,8 @@ def test_dashboard_import_audio_is_local_only(tmp_path: Path):
     assert snippet["audio"]["target_source_label"] == "Manual pink"
     assert snippet["audio"]["phase"] == "Inhale"
     assert snippet["audio"]["gap_s"] == 0.25
+    assert snippet["audio"]["sequence_order"] == 3
+    assert snippet["audio"]["motion_mode"] == "stationary"
 
 
 def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):
@@ -253,6 +262,8 @@ def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):
             target_duration_s=4.0,
             render_mode="spatialize",
             gain=0.75,
+            sequence_order=2,
+            motion_mode="stationary",
         )
     ]
 
@@ -264,6 +275,10 @@ def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):
     assert imported["source_render_mode"] == "spatialize"
     assert imported["path"] == str(source)
     assert imported["gain"] == 0.75
+    component = config["source"]["stimulus_assembly"]["components"][0]
+    assert component["component_kind"] == "custom_audio"
+    assert component["sequence_order"] == 2
+    assert component["motion_mode"] == "stationary"
 
 
 def test_dashboard_render_job_uses_existing_render_backend(tmp_path: Path, monkeypatch):

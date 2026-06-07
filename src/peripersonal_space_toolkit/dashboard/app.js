@@ -44,6 +44,10 @@ const STIMULUS_SNIPPET_PLACEMENTS = [
   { value: "before", label: "Before stimulus" },
   { value: "after", label: "After stimulus" }
 ];
+const STIMULUS_MOTION_MODES = [
+  { value: "looming", label: "Looming" },
+  { value: "stationary", label: "Stationary" }
+];
 const TRAJECTORY_FIELD_IDS = [
   "start-distance",
   "end-distance",
@@ -220,6 +224,7 @@ function renderStimulus() {
   $("end-hold").value = controls.end_hold_s ?? 0.5;
   syncPreviewModeControls($("preview-mode").value || "2d");
   renderGeneratedNoiseSelect();
+  renderBuilderNoiseSelect();
   renderNoiseTable();
   renderAudioTable();
   refreshAssemblyTargetOptions();
@@ -240,19 +245,43 @@ function renderGeneratedNoiseSelect() {
   select.value = PROCEDURAL_NOISE_TYPES.some((item) => item.value === current) ? current : "";
 }
 
+function renderBuilderNoiseSelect() {
+  const select = $("builder-noise-type");
+  if (!select) return;
+  const current = select.value || "pink";
+  select.innerHTML = "";
+  for (const item of PROCEDURAL_NOISE_TYPES) {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = `${item.label} noise`;
+    select.appendChild(option);
+  }
+  select.value = PROCEDURAL_NOISE_TYPES.some((item) => item.value === current) ? current : "pink";
+}
+
 function renderNoiseTable() {
   const list = $("noise-list");
   list.innerHTML = "";
-  for (const noise of state.design.noises || []) {
+  const noises = (state.design.noises || [])
+    .map((noise, index) => ({
+      ...noise,
+      sequence_order: sourceSequenceOrder(noise, index + 1),
+      motion_mode: normalizeMotionMode(noise.motion_mode),
+    }))
+    .sort(compareComponentOrder);
+  for (const [index, noise] of noises.entries()) {
     const selectedNoise = String(noise.noise_type || "pink").toLowerCase();
     const card = document.createElement("div");
     card.className = "source-card noise-source-card";
+    card.dataset.sourceToken = `noise-${index}`;
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(noiseTypeLabel(selectedNoise))} noise</strong>
         <button type="button" data-remove-noise>Remove</button>
       </div>
       <div class="source-card-fields">
+        <input data-field="sequence_order" type="hidden" value="${Number(noise.sequence_order || index + 1)}">
+        <input data-field="motion_mode" type="hidden" value="${escapeAttr(noise.motion_mode || "looming")}">
         <div class="field-row">
           <label>Label</label>
           <input data-field="label" value="${escapeAttr(noise.label || "")}">
@@ -284,11 +313,24 @@ function renderNoiseTable() {
 function renderAudioTable() {
   const list = $("audio-list");
   list.innerHTML = "";
+  const noiseCount = (state.design.noises || []).length;
+  const customFiles = state.design.custom_looming_files || [];
+  const snippets = state.design.prestimulus_files || [];
   const rows = [
-    ...(state.design.custom_looming_files || []).map((item) => ({ ...item, audio_role: item.render_mode || "preserve" })),
-    ...(state.design.prestimulus_files || []).map((item) => ({ ...item, audio_role: "prestimulus" }))
-  ];
-  for (const audio of rows) {
+    ...customFiles.map((item, index) => ({
+      ...item,
+      audio_role: item.render_mode || "preserve",
+      sequence_order: sourceSequenceOrder(item, noiseCount + index + 1),
+      motion_mode: normalizeMotionMode(item.motion_mode),
+    })),
+    ...snippets.map((item, index) => ({
+      ...item,
+      audio_role: "prestimulus",
+      sequence_order: sourceSequenceOrder(item, noiseCount + customFiles.length + index + 1),
+      motion_mode: normalizeMotionMode(item.motion_mode || "stationary"),
+    }))
+  ].sort(compareComponentOrder);
+  for (const [index, audio] of rows.entries()) {
     const role = String(audio.audio_role || audio.use || audio.render_mode || "preserve").toLowerCase();
     const placement = normalizeSnippetPlacement(audio.placement);
     const targetSource = audio.target_source_label || "";
@@ -296,12 +338,15 @@ function renderAudioTable() {
     const card = document.createElement("div");
     card.className = "source-card audio-source-card";
     card.dataset.audioRole = role;
+    card.dataset.sourceToken = `audio-${index}`;
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(audioRoleTitle(role))}</strong>
         <button type="button" data-remove-audio>Remove</button>
       </div>
       <div class="source-card-fields audio-source-fields">
+        <input data-field="sequence_order" type="hidden" value="${Number(audio.sequence_order || noiseCount + index + 1)}">
+        <input data-field="motion_mode" type="hidden" value="${escapeAttr(audio.motion_mode || (role === "prestimulus" ? "stationary" : "looming"))}">
         <div class="field-row">
           <label>Source handling</label>
           <select data-field="audio_role">
@@ -437,42 +482,85 @@ function refreshAssemblyTargetOptions() {
 function renderStimulusAssembly() {
   const list = $("assembly-list");
   if (!list) return;
-  const snippets = collectAssemblySnippets();
-  $("assembly-counts").textContent = `${snippets.length} snippet${snippets.length === 1 ? "" : "s"}`;
-  list.innerHTML = snippets.length
-    ? snippets.map(renderAssemblySnippet).join("")
-    : `<div class="assembly-empty">No assembly snippets.</div>`;
+  const components = collectAssemblyComponents();
+  $("assembly-counts").textContent = `${components.length} component${components.length === 1 ? "" : "s"}`;
+  list.innerHTML = components.length
+    ? components.map((component, index) => renderAssemblyComponent(component, index)).join("")
+    : `<div class="assembly-empty">No stimulus components.</div>`;
 }
 
-function collectAssemblySnippets() {
-  return [...$("audio-list").querySelectorAll(".audio-source-card")]
-    .filter((card) => card.querySelector('[data-field="audio_role"]')?.value === "prestimulus")
-    .map((card) => {
-      const field = (name) => card.querySelector(`[data-field="${name}"]`);
-      return {
-        label: field("label")?.value.trim() || "Instruction snippet",
-        placement: normalizeSnippetPlacement(field("placement")?.value),
-        target: field("target_source_label")?.value.trim() || "Every stimulus source",
-        phase: field("phase")?.value.trim(),
-        gap_s: Number(field("gap_s")?.value || 0),
-      };
+function collectAssemblyComponents() {
+  const components = [];
+  for (const card of $("noise-list").querySelectorAll(".noise-source-card")) {
+    const field = (name) => card.querySelector(`[data-field="${name}"]`);
+    const noiseType = field("noise_type")?.value || "pink";
+    components.push({
+      token: card.dataset.sourceToken,
+      kind: "generated_noise",
+      label: field("label")?.value.trim() || `${noiseTypeLabel(noiseType)} noise`,
+      detail: `${noiseTypeLabel(noiseType)} generated noise`,
+      sequence_order: Number(field("sequence_order")?.value || 0),
+      motion_mode: normalizeMotionMode(field("motion_mode")?.value),
     });
+  }
+  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+    const field = (name) => card.querySelector(`[data-field="${name}"]`);
+    const role = field("audio_role")?.value || "preserve";
+    const isSnippet = role === "prestimulus";
+    const placement = normalizeSnippetPlacement(field("placement")?.value);
+    const phase = field("phase")?.value.trim();
+    const gap = Number(field("gap_s")?.value || 0);
+    const target = field("target_source_label")?.value.trim();
+    const detail = isSnippet
+      ? `${placement === "after" ? "After" : "Before"} ${target || "every source"}${phase ? `, ${phase}` : ""}${gap > 0 ? `, ${gap.toFixed(2)} s gap` : ""}`
+      : audioRoleTitle(role);
+    components.push({
+      token: card.dataset.sourceToken,
+      kind: isSnippet ? "instruction_snippet" : "custom_audio",
+      label: field("label")?.value.trim() || audioRoleTitle(role),
+      detail,
+      sequence_order: Number(field("sequence_order")?.value || 0),
+      motion_mode: normalizeMotionMode(field("motion_mode")?.value || (isSnippet ? "stationary" : "looming")),
+    });
+  }
+  return components.sort(compareComponentOrder);
 }
 
-function renderAssemblySnippet(snippet) {
-  const placement = snippet.placement === "after" ? "After" : "Before";
-  const phase = snippet.phase ? `, ${escapeHtml(snippet.phase)}` : "";
-  const gap = snippet.gap_s > 0 ? `, ${Number(snippet.gap_s).toFixed(2)} s gap` : "";
+function renderAssemblyComponent(component, index) {
   return `
-    <div class="assembly-item">
-      <strong>${escapeHtml(snippet.label)}</strong>
-      <span>${placement}: ${escapeHtml(snippet.target)}${phase}${gap}</span>
+    <div class="assembly-item" draggable="true" data-source-token="${escapeAttr(component.token || "")}">
+      <div class="assembly-drag-handle" aria-hidden="true">Drag</div>
+      <div class="assembly-index">${index + 1}</div>
+      <div class="assembly-copy">
+        <strong>${escapeHtml(component.label)}</strong>
+        <span>${escapeHtml(component.detail)}</span>
+      </div>
+      <div class="segmented assembly-motion" role="group" aria-label="Motion mode">
+        ${STIMULUS_MOTION_MODES.map((item) => `
+          <button type="button" data-motion-mode="${item.value}" class="${component.motion_mode === item.value ? "active" : ""}" aria-pressed="${component.motion_mode === item.value}">
+            ${escapeHtml(item.label)}
+          </button>
+        `).join("")}
+      </div>
     </div>
   `;
 }
 
 function normalizeSnippetPlacement(value) {
   return value === "after" ? "after" : "before";
+}
+
+function normalizeMotionMode(value) {
+  return value === "stationary" ? "stationary" : "looming";
+}
+
+function sourceSequenceOrder(source, fallback) {
+  const order = Number(source?.sequence_order || 0);
+  return Number.isFinite(order) && order > 0 ? order : fallback;
+}
+
+function compareComponentOrder(a, b) {
+  return Number(a.sequence_order || 0) - Number(b.sequence_order || 0);
 }
 
 function renderTrials() {
@@ -680,7 +768,9 @@ function collectNoises() {
       noise_type: field("noise_type").value,
       azimuth_deg: Number(field("azimuth_deg").value || 0),
       elevation_deg: Number(field("elevation_deg").value || 0),
-      gain: Number(field("gain").value || 1)
+      gain: Number(field("gain").value || 1),
+      sequence_order: Math.max(0, Math.round(Number(field("sequence_order")?.value || 0))),
+      motion_mode: normalizeMotionMode(field("motion_mode")?.value)
     };
   });
 }
@@ -699,7 +789,9 @@ function collectAudioFiles() {
       placement: normalizeSnippetPlacement(field("placement")?.value),
       target_source_label: field("target_source_label")?.value.trim() || "",
       phase: field("phase")?.value.trim() || "",
-      gap_s: Math.max(0, Number(field("gap_s")?.value || 0))
+      gap_s: Math.max(0, Number(field("gap_s")?.value || 0)),
+      sequence_order: Math.max(0, Math.round(Number(field("sequence_order")?.value || 0))),
+      motion_mode: normalizeMotionMode(field("motion_mode")?.value || (role === "prestimulus" ? "stationary" : "looming"))
     };
     if (role === "prestimulus") {
       result.prestimulus.push(item);
@@ -1119,12 +1211,22 @@ function addNoiseRow(noiseType = "pink") {
     noise_type: type,
     azimuth_deg: 0,
     elevation_deg: 0,
-    gain: 1
+    gain: 1,
+    sequence_order: nextSequenceOrder(),
+    motion_mode: "looming"
   });
   renderNoiseTable();
   refreshAssemblyTargetOptions();
   renderStimulusAssembly();
   renderSourceCounts();
+}
+
+function nextSequenceOrder() {
+  const orders = [
+    ...$("noise-list").querySelectorAll('[data-field="sequence_order"]'),
+    ...$("audio-list").querySelectorAll('[data-field="sequence_order"]'),
+  ].map((field) => Number(field.value || 0)).filter((value) => Number.isFinite(value));
+  return orders.length ? Math.max(...orders) + 1 : 1;
 }
 
 function noiseTypeLabel(noiseType) {
@@ -1148,6 +1250,8 @@ async function importAudioFromPicker() {
   input.value = "";
   if (!file) return;
   const contentBase64 = await fileToBase64(file);
+  const motionMode = pendingAudioImportMode === "prestimulus" ? "stationary" : "looming";
+  const sequenceOrder = nextSequenceOrder();
   const imported = await api("/api/audio/import", {
     method: "POST",
     body: JSON.stringify({
@@ -1158,15 +1262,17 @@ async function importAudioFromPicker() {
       placement: "before",
       target_source_label: "",
       phase: "",
-      gap_s: 0
+      gap_s: 0,
+      sequence_order: sequenceOrder,
+      motion_mode: motionMode
     })
   });
   if (pendingAudioImportMode === "prestimulus") {
     state.design.prestimulus_files = state.design.prestimulus_files || [];
-    state.design.prestimulus_files.push({ ...imported.audio, placement: "before", target_source_label: "", phase: "", gap_s: 0 });
+    state.design.prestimulus_files.push({ ...imported.audio, placement: "before", target_source_label: "", phase: "", gap_s: 0, sequence_order: sequenceOrder, motion_mode: motionMode });
   } else {
     state.design.custom_looming_files = state.design.custom_looming_files || [];
-    state.design.custom_looming_files.push(imported.audio);
+    state.design.custom_looming_files.push({ ...imported.audio, sequence_order: sequenceOrder, motion_mode: motionMode });
   }
   renderAudioTable();
   refreshAssemblyTargetOptions();
@@ -1191,8 +1297,43 @@ function removeSourceCard(button) {
   const card = button.closest(".source-card");
   if (card) card.remove();
   refreshAssemblyTargetOptions();
+  updateSequenceFromBuilder();
   renderStimulusAssembly();
   renderSourceCounts();
+}
+
+function sourceCardForToken(token) {
+  if (!token) return null;
+  return document.querySelector(`.source-card[data-source-token="${token}"]`);
+}
+
+function setCardFieldValue(card, name, value) {
+  const field = card?.querySelector(`[data-field="${name}"]`);
+  if (field) field.value = value;
+}
+
+function updateSequenceFromBuilder() {
+  const items = [...$("assembly-list").querySelectorAll(".assembly-item[data-source-token]")];
+  items.forEach((item, index) => {
+    setCardFieldValue(sourceCardForToken(item.dataset.sourceToken), "sequence_order", String(index + 1));
+  });
+}
+
+function moveAssemblyItemDuringDrag(event) {
+  const dragged = $("assembly-list").querySelector(".assembly-item.dragging");
+  const target = event.target.closest?.(".assembly-item");
+  if (!dragged || !target || dragged === target) return;
+  const targetRect = target.getBoundingClientRect();
+  const shouldPlaceAfter = event.clientY > targetRect.top + targetRect.height / 2;
+  target.parentElement.insertBefore(dragged, shouldPlaceAfter ? target.nextSibling : target);
+}
+
+function setMotionModeFromBuilder(button) {
+  const item = button.closest(".assembly-item");
+  const card = sourceCardForToken(item?.dataset.sourceToken);
+  const mode = normalizeMotionMode(button.dataset.motionMode);
+  setCardFieldValue(card, "motion_mode", mode);
+  renderStimulusAssembly();
 }
 
 function delay(ms) {
@@ -1254,6 +1395,8 @@ function wireEvents() {
     addNoiseRow(selectedNoise);
     $("generated-noise-select").value = "";
   });
+  $("builder-add-noise").addEventListener("click", () => addNoiseRow($("builder-noise-type").value || "pink"));
+  $("builder-add-audio").addEventListener("click", () => openAudioPicker("spatialize"));
   $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
   $("import-audio-preserve").addEventListener("click", () => openAudioPicker("preserve"));
   $("import-audio-prestimulus").addEventListener("click", () => openAudioPicker("prestimulus"));
@@ -1302,6 +1445,9 @@ function wireEvents() {
     if (event.target.matches("[data-remove-noise], [data-remove-audio]")) {
       removeSourceCard(event.target);
     }
+    if (event.target.matches("[data-motion-mode]")) {
+      setMotionModeFromBuilder(event.target);
+    }
   });
   document.addEventListener("input", (event) => {
     const card = event.target.closest?.(".source-card");
@@ -1309,9 +1455,7 @@ function wireEvents() {
     if (event.target.matches('[data-field="label"]')) {
       refreshAssemblyTargetOptions();
     }
-    if (card.classList.contains("audio-source-card")) {
-      renderStimulusAssembly();
-    }
+    renderStimulusAssembly();
   });
   document.addEventListener("change", (event) => {
     if (event.target.matches('[data-field="audio_role"]')) {
@@ -1327,10 +1471,29 @@ function wireEvents() {
       const card = event.target.closest(".noise-source-card");
       const title = card?.querySelector(".source-card-heading strong");
       if (title) title.textContent = `${noiseTypeLabel(event.target.value)} noise`;
+      renderStimulusAssembly();
     }
     if (event.target.closest?.(".audio-source-card")) {
       renderStimulusAssembly();
     }
+  });
+  const assemblyList = $("assembly-list");
+  assemblyList.addEventListener("dragstart", (event) => {
+    const item = event.target.closest?.(".assembly-item");
+    if (!item) return;
+    item.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", item.dataset.sourceToken || "");
+  });
+  assemblyList.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    moveAssemblyItemDuringDrag(event);
+  });
+  assemblyList.addEventListener("dragend", () => {
+    const dragged = assemblyList.querySelector(".assembly-item.dragging");
+    if (dragged) dragged.classList.remove("dragging");
+    updateSequenceFromBuilder();
+    renderStimulusAssembly();
   });
 }
 

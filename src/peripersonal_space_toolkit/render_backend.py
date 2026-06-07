@@ -146,15 +146,49 @@ def _noise_rows(design: StimulusDesign) -> list[dict[str, Any]]:
 
 def _stimulus_assembly_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    fallback_order = 1
+    for noise in design.noises:
+        if not noise.label.strip():
+            continue
+        rows.append(
+            {
+                "component_kind": "generated_noise",
+                "label": noise.label,
+                "noise_type": noise.noise_type,
+                "gain": noise.gain,
+                "sequence_order": noise.sequence_order or fallback_order,
+                "motion_mode": noise.motion_mode,
+            }
+        )
+        fallback_order += 1
+    for asset in design.custom_looming_files:
+        if not asset.label.strip() and not asset.path.strip():
+            continue
+        rows.append(
+            {
+                "component_kind": "custom_audio",
+                "label": asset.label,
+                "path": asset.path,
+                "target_duration_s": asset.target_duration_s,
+                "gain": asset.gain,
+                "sequence_order": asset.sequence_order or fallback_order,
+                "motion_mode": asset.motion_mode,
+                "source_render_mode": asset.render_mode,
+            }
+        )
+        fallback_order += 1
     for asset in design.prestimulus_files:
         if not asset.label.strip() and not asset.path.strip():
             continue
         rows.append(
             {
+                "component_kind": "instruction_snippet",
                 "label": asset.label,
                 "path": asset.path,
                 "target_duration_s": asset.target_duration_s,
                 "gain": asset.gain,
+                "sequence_order": asset.sequence_order or fallback_order,
+                "motion_mode": asset.motion_mode,
                 "placement": asset.placement,
                 "target_source_label": asset.target_source_label,
                 "phase": asset.phase,
@@ -162,7 +196,24 @@ def _stimulus_assembly_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 "source_render_mode": asset.render_mode,
             }
         )
-    return rows
+        fallback_order += 1
+    return sorted(rows, key=lambda item: (int(item.get("sequence_order", 0) or 0), str(item.get("label", ""))))
+
+
+def _stimulus_snippet_rows(design: StimulusDesign) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in _stimulus_assembly_rows(design)
+        if row.get("component_kind") == "instruction_snippet"
+    ]
+
+
+def _source_motion_mode(config: dict[str, Any], source: dict[str, Any]) -> str:
+    label = str(source.get("label", ""))
+    for component in config["source"].get("stimulus_assembly", {}).get("components", []):
+        if component.get("label") == label and component.get("component_kind") in {"generated_noise", "custom_audio"}:
+            return "stationary" if component.get("motion_mode") == "stationary" else "looming"
+    return "looming"
 
 
 def _listener_head_diameter_m(design: StimulusDesign) -> float:
@@ -443,6 +494,7 @@ def _spatialize_moving_source(
     hrir_len = int(sofa["hrirs"].shape[-1])
     stereo = np.zeros((total_samples + hrir_len + frame_samples, 2), dtype=float)
     used_hrir_indices: set[int] = set()
+    stationary_point = _sample_from_config(config, 0.0) if _source_motion_mode(config, source) == "stationary" else None
 
     for start in range(0, total_samples, hop_samples):
         stop = min(total_samples, start + frame_samples)
@@ -452,7 +504,7 @@ def _spatialize_moving_source(
         frame = np.zeros(frame_samples, dtype=float)
         frame[:valid] = dry[start:stop]
         center_time = (start + valid / 2.0) / sample_rate
-        point = _sample_from_config(config, center_time)
+        point = stationary_point or _sample_from_config(config, center_time)
         spherical = cartesian_to_spherical(point["x_m"], point["y_m"], point["z_m"])
         hrir_index = _nearest_hrir_index(
             sofa["positions"],
@@ -555,7 +607,8 @@ def build_render_config(
             "noises": sources,
             "imported_audio_count": imported_source_count,
             "stimulus_assembly": {
-                "snippets": _stimulus_assembly_rows(design),
+                "components": _stimulus_assembly_rows(design),
+                "snippets": _stimulus_snippet_rows(design),
                 "integration": "recorded_for_session_assembly",
             },
             "gain_law": "3DTI_free_field_direct_path",

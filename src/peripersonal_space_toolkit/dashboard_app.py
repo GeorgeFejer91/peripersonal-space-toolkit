@@ -288,6 +288,9 @@ class DashboardController:
         placement = str(payload.get("placement") or "before").strip().lower()
         if placement not in {"before", "after"}:
             placement = "before"
+        motion_mode = str(payload.get("motion_mode") or "looming").strip().lower()
+        if motion_mode not in {"looming", "stationary"}:
+            motion_mode = "looming"
         audio = AudioFileSpec(
             label=label,
             path=str(path),
@@ -298,6 +301,8 @@ class DashboardController:
             target_source_label=str(payload.get("target_source_label") or "").strip(),
             phase=str(payload.get("phase") or "").strip(),
             gap_s=max(0.0, _float(payload.get("gap_s"), 0.0)),
+            sequence_order=max(0, int(_float(payload.get("sequence_order"), 0.0))),
+            motion_mode=motion_mode,
         )
         return {
             "audio": asdict(audio),

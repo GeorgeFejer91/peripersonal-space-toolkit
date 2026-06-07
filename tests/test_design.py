@@ -49,6 +49,8 @@ def test_design_json_round_trip_and_trajectory_export(tmp_path: Path):
             target_source_label="Pink frontal",
             phase="Inhale",
             gap_s=0.25,
+            sequence_order=1,
+            motion_mode="stationary",
         )
     ]
     design_path = tmp_path / "design.json"
@@ -62,6 +64,8 @@ def test_design_json_round_trip_and_trajectory_export(tmp_path: Path):
     assert loaded.prestimulus_files[0].target_source_label == "Pink frontal"
     assert loaded.prestimulus_files[0].phase == "Inhale"
     assert loaded.prestimulus_files[0].gap_s == pytest.approx(0.25)
+    assert loaded.prestimulus_files[0].sequence_order == 1
+    assert loaded.prestimulus_files[0].motion_mode == "stationary"
 
     export_trajectory_csv(loaded, csv_path, samples=7)
     text = csv_path.read_text(encoding="utf-8")
@@ -79,10 +83,13 @@ def test_design_loads_string_audio_preload_paths():
     assert design.custom_looming_files[0].label == "custom_looming"
     assert design.prestimulus_files[0].target_duration_s == 4.0
     assert design.prestimulus_files[0].placement == "before"
+    assert design.custom_looming_files[0].motion_mode == "looming"
+    assert design.prestimulus_files[0].motion_mode == "stationary"
 
 
 def test_render_config_records_custom_stimulus_assembly(tmp_path: Path):
     design = default_design()
+    design.noises = design.noises[:1]
     design.prestimulus_files = [
         AudioFileSpec(
             "inhale instruction",
@@ -92,18 +99,28 @@ def test_render_config_records_custom_stimulus_assembly(tmp_path: Path):
             target_source_label="Pink frontal",
             phase="Inhale",
             gap_s=0.15,
+            sequence_order=3,
+            motion_mode="stationary",
         )
     ]
+    design.noises[0].sequence_order = 2
+    design.noises[0].motion_mode = "stationary"
 
     config = build_render_config(design, seed=20250604, output_dir=tmp_path)
 
+    components = config["source"]["stimulus_assembly"]["components"]
     snippets = config["source"]["stimulus_assembly"]["snippets"]
     assert config["source"]["stimulus_assembly"]["integration"] == "recorded_for_session_assembly"
+    assert [component["component_kind"] for component in components[:2]] == ["generated_noise", "instruction_snippet"]
+    assert components[0]["sequence_order"] == 2
+    assert components[0]["motion_mode"] == "stationary"
     assert snippets[0]["label"] == "inhale instruction"
     assert snippets[0]["placement"] == "before"
     assert snippets[0]["target_source_label"] == "Pink frontal"
     assert snippets[0]["phase"] == "Inhale"
     assert snippets[0]["gap_s"] == pytest.approx(0.15)
+    assert snippets[0]["sequence_order"] == 3
+    assert snippets[0]["motion_mode"] == "stationary"
 
 
 def test_imported_looming_audio_can_render_as_experiment_source(tmp_path: Path):
