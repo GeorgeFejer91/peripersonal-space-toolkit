@@ -49,8 +49,12 @@ const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const dragPoint = new THREE.Vector3();
 const dragHandles = new Map();
 let activeDragHandle = "";
+let activePan2D = false;
+let panStartClientX = 0;
+let panStartClientY = 0;
+const panStartTarget = new THREE.Vector3();
 
-function fit2DCameraToRadius() {
+function fit2DCameraToRadius({ resetCenter = true } = {}) {
   const aspect = Math.max(0.1, camera.aspect || 1);
   const radiusSpan = Math.max(currentRadius * 2 * TWO_D_RADIUS_PADDING, TWO_D_MIN_WORLD_SPAN);
   const verticalSpan = Math.max(radiusSpan, radiusSpan / aspect);
@@ -58,25 +62,50 @@ function fit2DCameraToRadius() {
   lastTwoDCameraDistance = distance;
   lastTwoDVerticalSpan = verticalSpan;
   lastTwoDFitAspect = aspect;
-  controls.target.set(0, 0, 0);
   controls.enabled = false;
-  camera.position.set(0, distance, 0);
-  camera.lookAt(controls.target);
+  if (resetCenter) {
+    controls.target.set(0, 0, 0);
+  }
+  set2DViewCenter(controls.target);
   camera.updateProjectionMatrix();
   controls.minDistance = distance;
   controls.maxDistance = distance;
 }
 
+function twoDViewSpans() {
+  return {
+    horizontal: lastTwoDVerticalSpan * lastTwoDFitAspect,
+    vertical: lastTwoDVerticalSpan
+  };
+}
+
+function clamp2DViewCenter(center) {
+  const spans = twoDViewSpans();
+  const maxX = Math.max(0, spans.horizontal / 2 - currentRadius);
+  const maxZ = Math.max(0, spans.vertical / 2 - currentRadius);
+  return new THREE.Vector3(
+    clamp(center.x, -maxX, maxX),
+    0,
+    clamp(center.z, -maxZ, maxZ)
+  );
+}
+
+function set2DViewCenter(center) {
+  const nextCenter = clamp2DViewCenter(center);
+  controls.target.copy(nextCenter);
+  camera.position.set(nextCenter.x, lastTwoDCameraDistance, nextCenter.z);
+  camera.lookAt(controls.target);
+}
+
 function applyCameraMode(mode, resetCamera = false) {
   if (mode === "2d") {
     camera.up.set(0, 0, -1);
-    controls.target.set(0, 0, 0);
     controls.enableRotate = false;
     controls.enableZoom = false;
     controls.enablePan = false;
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = 0;
-    fit2DCameraToRadius();
+    fit2DCameraToRadius({ resetCenter: resetCamera });
   } else {
     camera.up.set(0, 1, 0);
     controls.target.set(0, 0, 0);
@@ -320,8 +349,9 @@ function drawScene(payload) {
   currentViewMode = mode;
   currentRadius = radius;
   if (!is2D) {
-    if (activeDragHandle) {
+    if (activeDragHandle || activePan2D) {
       activeDragHandle = "";
+      activePan2D = false;
       controls.enabled = true;
     }
     renderer.domElement.style.cursor = "";
@@ -405,6 +435,9 @@ function drawScene(payload) {
     two_d_fit_vertical_span_m: is2D ? lastTwoDVerticalSpan.toFixed(3) : "",
     two_d_camera_distance_m: is2D ? lastTwoDCameraDistance.toFixed(3) : "",
     two_d_fit_aspect: is2D ? lastTwoDFitAspect.toFixed(3) : "",
+    two_d_pan_enabled: is2D,
+    two_d_view_center_x_m: is2D ? controls.target.x.toFixed(3) : "",
+    two_d_view_center_z_m: is2D ? controls.target.z.toFixed(3) : "",
     start_distance_cm: payload.controls?.start_distance_cm ?? "",
     end_distance_cm: payload.controls?.end_distance_cm ?? "",
     start_rotation_deg: payload.controls?.start_rotation_deg ?? "",
@@ -424,6 +457,9 @@ function drawScene(payload) {
   container.dataset.twoDFitVerticalSpanM = window.__trajectoryViewerState.two_d_fit_vertical_span_m;
   container.dataset.twoDCameraDistanceM = window.__trajectoryViewerState.two_d_camera_distance_m;
   container.dataset.twoDFitAspect = window.__trajectoryViewerState.two_d_fit_aspect;
+  container.dataset.twoDPanEnabled = String(window.__trajectoryViewerState.two_d_pan_enabled);
+  container.dataset.twoDViewCenterXM = window.__trajectoryViewerState.two_d_view_center_x_m;
+  container.dataset.twoDViewCenterZM = window.__trajectoryViewerState.two_d_view_center_z_m;
   container.dataset.startDistanceCm = String(window.__trajectoryViewerState.start_distance_cm);
   container.dataset.endDistanceCm = String(window.__trajectoryViewerState.end_distance_cm);
   container.dataset.startRotationDeg = String(window.__trajectoryViewerState.start_rotation_deg);
@@ -432,29 +468,46 @@ function drawScene(payload) {
 
 function handlePointerDown(event) {
   const handle = intersectDragHandle(event);
-  if (!handle) return;
+  if (!handle && currentViewMode !== "2d") return;
   event.preventDefault();
-  activeDragHandle = handle;
   controls.enabled = false;
   renderer.domElement.style.cursor = "grabbing";
   renderer.domElement.setPointerCapture(event.pointerId);
-  const point = intersectTrajectoryPlane(event);
-  if (point) emitTrajectoryControlChange(activeDragHandle, point);
+  if (handle) {
+    activeDragHandle = handle;
+    const point = intersectTrajectoryPlane(event);
+    if (point) emitTrajectoryControlChange(activeDragHandle, point);
+    return;
+  }
+  activePan2D = true;
+  panStartClientX = event.clientX;
+  panStartClientY = event.clientY;
+  panStartTarget.copy(controls.target);
 }
 
 function handlePointerMove(event) {
+  if (activePan2D) {
+    event.preventDefault();
+    const spans = twoDViewSpans();
+    const rect = renderer.domElement.getBoundingClientRect();
+    const dx = ((event.clientX - panStartClientX) / Math.max(1, rect.width)) * spans.horizontal;
+    const dy = ((event.clientY - panStartClientY) / Math.max(1, rect.height)) * spans.vertical;
+    set2DViewCenter(new THREE.Vector3(panStartTarget.x - dx, 0, panStartTarget.z - dy));
+    return;
+  }
   if (activeDragHandle) {
     event.preventDefault();
     const point = intersectTrajectoryPlane(event);
     if (point) emitTrajectoryControlChange(activeDragHandle, point);
     return;
   }
-  renderer.domElement.style.cursor = intersectDragHandle(event) ? "grab" : "";
+  renderer.domElement.style.cursor = currentViewMode === "2d" || intersectDragHandle(event) ? "grab" : "";
 }
 
 function handlePointerUp(event) {
-  if (!activeDragHandle) return;
+  if (!activeDragHandle && !activePan2D) return;
   activeDragHandle = "";
+  activePan2D = false;
   controls.enabled = currentViewMode !== "2d";
   renderer.domElement.style.cursor = "";
   if (renderer.domElement.hasPointerCapture(event.pointerId)) {
@@ -471,7 +524,7 @@ function resize() {
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   if (currentViewMode === "2d") {
-    fit2DCameraToRadius();
+    fit2DCameraToRadius({ resetCenter: false });
   } else {
     camera.updateProjectionMatrix();
   }
