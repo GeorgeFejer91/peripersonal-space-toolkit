@@ -103,6 +103,8 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="generated-noise-select"' in html
     assert 'id="bake-stimulus"' in html
     assert 'id="bake-status"' in html
+    assert 'id="stimulus-feedback-list"' in html
+    assert 'id="stimulus-render-status"' in html
     assert 'id="noise-list"' in html
     assert 'id="audio-list"' in html
     assert 'id="assembly-list"' not in html
@@ -113,6 +115,12 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="add-audio-spatialize"' not in html
     assert 'id="add-audio-preserve"' not in html
     assert "Stimulus Selection" in html
+    assert "Looming Stimuli Builder" in html
+    assert "Trajectory And Source" in html
+    assert "Backend Feedback" in html
+    assert "Trial Designer" in html
+    assert "Run Setup" in html
+    assert html.index('id="participants"') > html.index('id="run"')
     assert "Custom Stimulus Builder" not in html
     assert "Bake Stimulus" in html
     assert "Choose noise to bake" in html
@@ -124,6 +132,7 @@ def test_dashboard_static_assets_are_packaged():
     assert "/api/local/open-folder" in app_js
     assert "data-open-folder" in app_js
     assert "Open Folder" in app_js
+    assert "renderStimulusFeedback" in app_js
     assert "startBakeStimulus" in app_js
     assert "stageGeneratedNoise" in app_js
     assert "IMPORTED_AUDIO_HANDLING" in app_js

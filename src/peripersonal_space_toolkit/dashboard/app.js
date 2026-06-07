@@ -226,6 +226,7 @@ function renderStimulus() {
   renderAudioTable();
   refreshAssemblyTargetOptions();
   renderSourceCounts();
+  renderStimulusFeedback();
 }
 
 function renderGeneratedNoiseSelect() {
@@ -427,6 +428,32 @@ function renderSourceCounts() {
   $("source-counts").className = `status-label ${stimulusSources ? "ready" : "required"}`;
 }
 
+function renderStimulusFeedback() {
+  const status = $("stimulus-render-status");
+  const summary = $("stimulus-feedback-summary");
+  const list = $("stimulus-feedback-list");
+  if (!status || !summary || !list) return;
+
+  const render = state.render || {};
+  const wavCount = Number(render.wav_count || 0);
+  status.textContent = wavCount ? `${wavCount} local WAV${wavCount === 1 ? "" : "s"}` : "waiting";
+  status.className = `status-label ${wavCount ? "ready" : "required"}`;
+
+  const rows = [
+    ["Baked WAVs", wavCount ? `${wavCount} ready` : "none"],
+    ["Render engine", render.render_engine || "not run"],
+    ["Output folder", render.render_dir ? "available" : "pending"]
+  ];
+  summary.innerHTML = rows
+    .map(([label, value]) => `<div class="status-row"><strong>${label}</strong><span>${escapeHtml(value)}</span></div>`)
+    .join("");
+
+  const jobs = (state.jobs || []).filter((job) => ["stimulus_bake", "render"].includes(job.kind)).slice(0, 4);
+  list.innerHTML = jobs.length
+    ? jobs.map(renderJob).join("")
+    : `<div class="summary-text">No stimulus jobs yet.</div>`;
+}
+
 function stimulusTargetOptionsFromDesign(selected = "") {
   const options = stimulusSourceOptionsFromDesign();
   return renderOptionList(options, selected);
@@ -504,7 +531,6 @@ function normalizeSnippetPlacement(value) {
 function renderTrials() {
   const protocol = state.design.protocol || {};
   $("repetitions").value = protocol.repetitions_per_condition ?? 1;
-  $("participants").value = protocol.participants ?? 1;
   $("blocks").value = protocol.blocks ?? 1;
   $("catch-percent").value = protocol.catch_trial_percentage ?? 0;
   $("soa-values").value = formatList(protocol.soa_values_ms);
@@ -778,6 +804,7 @@ function syncFilmstripSourceOptions() {
 
 function renderRun() {
   const isCustom = Boolean(state.custom_workflow && state.custom_workflow.is_custom);
+  $("participants").value = state.design.protocol?.participants ?? 1;
   $("participant-id").value = state.participant_id || (isCustom ? "" : "P001");
   const preflight = state.preflight || {};
   const ready = Boolean(preflight.ready && state.session);
@@ -1353,7 +1380,8 @@ function startSplitterResize(event, gutter) {
   if (event.button !== 0) return;
   event.preventDefault();
   const key = splitKeyForGutter(gutter);
-  const container = gutter.closest(".grid, .table-grid");
+  const container = gutter.closest(".grid, .table-grid, .stimulus-grid, .run-grid");
+  if (!container) return;
   const rect = container.getBoundingClientRect();
   document.body.classList.add("resizing-layout");
   gutter.classList.add("active");
@@ -1380,7 +1408,9 @@ function resizeSplitterFromKeyboard(event, gutter) {
   const direction = event.key === "ArrowLeft" ? 1 : -1;
   const cssVar = key === "sideWidth" ? "--side-column-width" : "--orders-column-width";
   const current = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(cssVar));
-  applySplitSetting(key, current + direction * PANEL_RESIZE_SNAP_PX, true, gutter.closest(".grid, .table-grid").getBoundingClientRect());
+  const container = gutter.closest(".grid, .table-grid, .stimulus-grid, .run-grid");
+  if (!container) return;
+  applySplitSetting(key, current + direction * PANEL_RESIZE_SNAP_PX, true, container.getBoundingClientRect());
 }
 
 function applySplitSetting(key, value, persist = true, containerRect = null) {

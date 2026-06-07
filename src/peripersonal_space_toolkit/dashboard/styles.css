@@ -287,6 +287,38 @@ code {
   flex-wrap: wrap;
 }
 
+.decision-segment {
+  margin-top: 14px;
+  scroll-margin-top: 84px;
+}
+
+.decision-segment > .panel + .panel {
+  margin-top: var(--panel-gap);
+}
+
+.segment-heading {
+  min-height: 38px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 0 2px;
+}
+
+.segment-heading h2 {
+  margin: 0;
+  color: #202621;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.segment-kicker {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .grid {
   margin-top: 14px;
   display: grid;
@@ -298,6 +330,27 @@ code {
 
 .main-column,
 .side-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+  min-width: 0;
+}
+
+.stimulus-grid,
+.run-grid {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) 8px minmax(320px, var(--side-column-width));
+  column-gap: 0;
+  row-gap: var(--panel-gap);
+  align-items: start;
+}
+
+.run-grid {
+  grid-template-columns: minmax(360px, 0.9fr) 8px minmax(300px, var(--orders-column-width));
+}
+
+.stimulus-side-column,
+.run-side-stack {
   display: flex;
   flex-direction: column;
   gap: var(--panel-gap);
@@ -497,6 +550,10 @@ select:focus {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.trial-decision-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .table-toolbar {
@@ -948,6 +1005,10 @@ select:focus {
   gap: 7px;
 }
 
+.job-list.compact .job-item pre {
+  max-height: 92px;
+}
+
 .job-item {
   border: 1px solid var(--line);
   background: var(--surface-2);
@@ -1035,7 +1096,9 @@ select:focus {
   }
 
   .grid,
-  .table-grid {
+  .table-grid,
+  .stimulus-grid,
+  .run-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1081,6 +1144,10 @@ select:focus {
 
   .split-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .trial-decision-fields {
+    grid-template-columns: 1fr;
   }
 
   .bake-panel {
