@@ -79,7 +79,8 @@ async function api(path, options = {}) {
     } catch (_err) {
       detail = await response.text();
     }
-    setConnectionStatus(false);
+    // HTTP errors still mean the companion answered; only fetch failures are disconnected.
+    setConnectionStatus(true);
     throw new Error(detail);
   }
   setConnectionStatus(true);

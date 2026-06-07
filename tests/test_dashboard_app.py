@@ -132,6 +132,7 @@ def test_dashboard_static_assets_are_packaged():
     assert "/api/local/open-folder" in app_js
     assert "data-open-folder" in app_js
     assert "Open Folder" in app_js
+    assert "HTTP errors still mean the companion answered" in app_js
     assert "renderStimulusFeedback" in app_js
     assert "startBakeStimulus" in app_js
     assert "stageGeneratedNoise" in app_js
