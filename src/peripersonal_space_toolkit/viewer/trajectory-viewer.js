@@ -38,7 +38,7 @@ let lastTwoDFitAspect = 1;
 const HEAD_CENTER_Y = 1.33;
 const DISTANCE_CM_MIN = 1;
 const DISTANCE_CM_MAX = 1000;
-const TWO_D_RADIUS_PADDING = 1.08;
+const TWO_D_RADIUS_PADDING = 1.24;
 const TWO_D_MIN_WORLD_SPAN = 0.5;
 const START_MARKER_COLOR = 0x4ecb71;
 const END_MARKER_COLOR = 0xe0524d;
@@ -53,18 +53,18 @@ let activeDragHandle = "";
 function fit2DCameraToRadius() {
   const aspect = Math.max(0.1, camera.aspect || 1);
   const radiusSpan = Math.max(currentRadius * 2 * TWO_D_RADIUS_PADDING, TWO_D_MIN_WORLD_SPAN);
-  const verticalSpan = aspect < 1 ? radiusSpan / aspect : radiusSpan;
+  const verticalSpan = Math.max(radiusSpan, radiusSpan / aspect);
   const distance = verticalSpan / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
   lastTwoDCameraDistance = distance;
   lastTwoDVerticalSpan = verticalSpan;
   lastTwoDFitAspect = aspect;
   controls.target.set(0, 0, 0);
+  controls.enabled = false;
   camera.position.set(0, distance, 0);
   camera.lookAt(controls.target);
   camera.updateProjectionMatrix();
   controls.minDistance = distance;
   controls.maxDistance = distance;
-  controls.update();
 }
 
 function applyCameraMode(mode, resetCamera = false) {
@@ -80,6 +80,7 @@ function applyCameraMode(mode, resetCamera = false) {
   } else {
     camera.up.set(0, 1, 0);
     controls.target.set(0, 0, 0);
+    controls.enabled = true;
     controls.enableRotate = true;
     controls.enableZoom = true;
     controls.enablePan = false;
@@ -90,7 +91,9 @@ function applyCameraMode(mode, resetCamera = false) {
     }
   }
   camera.lookAt(controls.target);
-  controls.update();
+  if (mode !== "2d") {
+    controls.update();
+  }
 }
 
 scene.add(new THREE.HemisphereLight(0xf7ead8, 0x332820, 1.8));
@@ -452,7 +455,7 @@ function handlePointerMove(event) {
 function handlePointerUp(event) {
   if (!activeDragHandle) return;
   activeDragHandle = "";
-  controls.enabled = true;
+  controls.enabled = currentViewMode !== "2d";
   renderer.domElement.style.cursor = "";
   if (renderer.domElement.hasPointerCapture(event.pointerId)) {
     renderer.domElement.releasePointerCapture(event.pointerId);
@@ -476,7 +479,9 @@ function resize() {
 
 function animate() {
   resize();
-  controls.update();
+  if (currentViewMode !== "2d") {
+    controls.update();
+  }
   renderer.render(scene, camera);
   window.requestAnimationFrame(animate);
 }

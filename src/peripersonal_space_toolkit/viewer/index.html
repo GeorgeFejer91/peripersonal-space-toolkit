@@ -51,6 +51,9 @@
     <strong>3D Sound Path</strong>
     <span id="viewer-status">Loading...</span>
   </div>
-  <script type="module" src="./trajectory-viewer.js"></script>
+  <script type="module">
+    const version = new URLSearchParams(window.location.search).get("v") || "local";
+    import(`./trajectory-viewer.js?v=${encodeURIComponent(version)}`);
+  </script>
 </body>
 </html>

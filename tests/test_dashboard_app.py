@@ -95,7 +95,7 @@ def test_dashboard_static_assets_are_packaged():
     viewer_js = viewer_files.joinpath("trajectory-viewer.js").read_text(encoding="utf-8")
     assert 'href="styles.css"' in html
     assert 'src="app.js"' in html
-    assert 'src="../viewer/index.html"' in html
+    assert 'src="../viewer/index.html?v=full-radius-2d"' in html
     assert 'id="audio-file-input"' in html
     assert 'id="import-audio-spatialize"' in html
     assert 'id="import-audio-preserve"' in html
@@ -149,8 +149,10 @@ def test_dashboard_static_assets_are_packaged():
     assert "end_marker_color" in viewer_js
     assert "fit2DCameraToRadius" in viewer_js
     assert "TWO_D_RADIUS_PADDING" in viewer_js
+    assert "controls.enabled = false" in viewer_js
     assert "two_d_radius_centered" in viewer_js
     assert "twoDFitVerticalSpanM" in viewer_js
+    assert "trajectory-viewer.js?v=" in viewer_files.joinpath("index.html").read_text(encoding="utf-8")
     assert "/api/" not in html
 
 
