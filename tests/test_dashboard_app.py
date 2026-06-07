@@ -90,6 +90,7 @@ def test_dashboard_static_assets_are_packaged():
     assert viewer_files.joinpath("trajectory-viewer.js").is_file()
 
     html = dashboard_files.joinpath("index.html").read_text(encoding="utf-8")
+    app_js = dashboard_files.joinpath("app.js").read_text(encoding="utf-8")
     viewer_js = viewer_files.joinpath("trajectory-viewer.js").read_text(encoding="utf-8")
     assert 'href="styles.css"' in html
     assert 'src="app.js"' in html
@@ -97,11 +98,15 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="audio-file-input"' in html
     assert 'id="import-audio-spatialize"' in html
     assert 'id="import-audio-preserve"' in html
+    assert 'id="generated-noise-select"' in html
+    assert 'id="noise-list"' in html
     assert 'id="source-counts"' in html
+    assert "Stimulus Selection" in html
     assert "Dry Custom Tone" in html
     assert "Already Looming / Control" in html
-    assert "White, pink, blue, violet, brown" in html
-    assert "IMPORTED_AUDIO_HANDLING" in dashboard_files.joinpath("app.js").read_text(encoding="utf-8")
+    assert "IMPORTED_AUDIO_HANDLING" in app_js
+    assert "PROCEDURAL_NOISE_TYPES" in app_js
+    assert "noise-source-card" in app_js
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js

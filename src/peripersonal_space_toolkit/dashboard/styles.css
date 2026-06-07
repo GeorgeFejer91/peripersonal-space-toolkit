@@ -545,6 +545,61 @@ select:focus {
   font-size: 12px;
 }
 
+.source-picker-card {
+  cursor: default;
+}
+
+.source-picker-card:hover {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+
+.source-picker-card label {
+  color: #37433b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.source-picker-card select {
+  min-height: 30px;
+  padding: 4px 7px;
+}
+
+.source-card-list {
+  display: grid;
+  gap: 8px;
+}
+
+.source-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  padding: 9px;
+}
+
+.source-card-heading {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.source-card-heading strong {
+  font-size: 13px;
+}
+
+.source-card-fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 1fr) repeat(3, minmax(84px, 0.8fr));
+  gap: 8px;
+}
+
+.source-card-fields .field-row {
+  margin-bottom: 0;
+}
+
 .toolbar-actions {
   display: flex;
   gap: 8px;
@@ -837,6 +892,10 @@ select:focus {
     grid-template-columns: 1fr;
   }
 
+  .source-card-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .workspace-splitter {
     display: none;
   }
@@ -855,5 +914,9 @@ select:focus {
 
   .split-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .source-card-fields {
+    grid-template-columns: 1fr;
   }
 }

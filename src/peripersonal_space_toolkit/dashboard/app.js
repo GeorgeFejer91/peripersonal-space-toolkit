@@ -215,29 +215,63 @@ function renderStimulus() {
   $("start-hold").value = controls.start_hold_s ?? 0.5;
   $("end-hold").value = controls.end_hold_s ?? 0.5;
   syncPreviewModeControls($("preview-mode").value || "2d");
+  renderGeneratedNoiseSelect();
   renderNoiseTable();
   renderAudioTable();
   renderSourceCounts();
 }
 
+function renderGeneratedNoiseSelect() {
+  const select = $("generated-noise-select");
+  const current = select.value;
+  select.innerHTML = '<option value="">Add generated noise...</option>';
+  for (const item of PROCEDURAL_NOISE_TYPES) {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    select.appendChild(option);
+  }
+  select.value = PROCEDURAL_NOISE_TYPES.some((item) => item.value === current) ? current : "";
+}
+
 function renderNoiseTable() {
-  const body = $("noise-table").querySelector("tbody");
-  body.innerHTML = "";
+  const list = $("noise-list");
+  list.innerHTML = "";
   for (const noise of state.design.noises || []) {
-    const row = body.insertRow();
     const selectedNoise = String(noise.noise_type || "pink").toLowerCase();
-    row.innerHTML = `
-      <td><input data-field="label" value="${escapeAttr(noise.label || "")}"></td>
-      <td>
-        <select data-field="noise_type">
+    const card = document.createElement("div");
+    card.className = "source-card noise-source-card";
+    card.innerHTML = `
+      <div class="source-card-heading">
+        <strong>${escapeHtml(noiseTypeLabel(selectedNoise))} noise</strong>
+        <button type="button" data-remove-noise>Remove</button>
+      </div>
+      <div class="source-card-fields">
+        <div class="field-row">
+          <label>Label</label>
+          <input data-field="label" value="${escapeAttr(noise.label || "")}">
+        </div>
+        <div class="field-row">
+          <label>Noise color</label>
+          <select data-field="noise_type">
           ${PROCEDURAL_NOISE_TYPES.map((item) => `<option value="${item.value}" ${item.value === selectedNoise ? "selected" : ""}>${item.label}</option>`).join("")}
-        </select>
-      </td>
-      <td><input data-field="azimuth_deg" type="number" step="1" value="${Number(noise.azimuth_deg || 0)}"></td>
-      <td><input data-field="elevation_deg" type="number" step="1" value="${Number(noise.elevation_deg || 0)}"></td>
-      <td><input data-field="gain" type="number" step="0.05" min="0.01" value="${Number(noise.gain || 1)}"></td>
-      <td class="remove-cell"><button type="button" data-remove-noise>Remove</button></td>
+          </select>
+        </div>
+        <div class="field-row">
+          <label>Azimuth</label>
+          <input data-field="azimuth_deg" type="number" step="1" value="${Number(noise.azimuth_deg || 0)}">
+        </div>
+        <div class="field-row">
+          <label>Elevation</label>
+          <input data-field="elevation_deg" type="number" step="1" value="${Number(noise.elevation_deg || 0)}">
+        </div>
+        <div class="field-row">
+          <label>Gain</label>
+          <input data-field="gain" type="number" step="0.05" min="0.01" value="${Number(noise.gain || 1)}">
+        </div>
+      </div>
     `;
+    list.appendChild(card);
   }
 }
 
@@ -267,7 +301,7 @@ function renderAudioTable() {
 }
 
 function renderSourceCounts() {
-  const generated = $("noise-table").querySelectorAll("tbody tr").length;
+  const generated = $("noise-list").querySelectorAll(".noise-source-card").length;
   const audioRows = [...$("audio-table").querySelectorAll("tbody tr")];
   const imported = audioRows.filter((row) => row.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
   const prestimulus = audioRows.filter((row) => row.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
@@ -474,8 +508,8 @@ function collectPayload() {
 }
 
 function collectNoises() {
-  return [...$("noise-table").querySelectorAll("tbody tr")].map((row) => {
-    const field = (name) => row.querySelector(`[data-field="${name}"]`);
+  return [...$("noise-list").querySelectorAll(".noise-source-card")].map((card) => {
+    const field = (name) => card.querySelector(`[data-field="${name}"]`);
     return {
       label: field("label").value.trim() || "Noise",
       noise_type: field("noise_type").value,
@@ -907,17 +941,23 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, value));
 }
 
-function addNoiseRow() {
+function addNoiseRow(noiseType = "pink") {
+  const type = PROCEDURAL_NOISE_TYPES.some((item) => item.value === noiseType) ? noiseType : "pink";
   state.design.noises = state.design.noises || [];
+  const label = noiseTypeLabel(type);
   state.design.noises.push({
-    label: "Pink noise",
-    noise_type: "pink",
+    label: `${label} noise`,
+    noise_type: type,
     azimuth_deg: 0,
     elevation_deg: 0,
     gain: 1
   });
   renderNoiseTable();
   renderSourceCounts();
+}
+
+function noiseTypeLabel(noiseType) {
+  return PROCEDURAL_NOISE_TYPES.find((item) => item.value === noiseType)?.label || "Generated";
 }
 
 function addAudioRow(renderMode = "preserve") {
@@ -1030,7 +1070,12 @@ function wireEvents() {
   $("prepare-action").addEventListener("click", () => prepareSession().catch(reportError));
   $("stress-action").addEventListener("click", () => stressAudio().catch(reportError));
   $("focus-action").addEventListener("click", () => startFocus().catch(reportError));
-  $("add-noise").addEventListener("click", addNoiseRow);
+  $("generated-noise-select").addEventListener("change", () => {
+    const selectedNoise = $("generated-noise-select").value;
+    if (!selectedNoise) return;
+    addNoiseRow(selectedNoise);
+    $("generated-noise-select").value = "";
+  });
   $("add-audio-spatialize").addEventListener("click", () => addAudioRow("spatialize"));
   $("add-audio-preserve").addEventListener("click", () => addAudioRow("preserve"));
   $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
@@ -1084,6 +1129,11 @@ function wireEvents() {
   document.addEventListener("change", (event) => {
     if (event.target.matches('[data-field="audio_role"]')) {
       renderSourceCounts();
+    }
+    if (event.target.matches('.noise-source-card [data-field="noise_type"]')) {
+      const card = event.target.closest(".noise-source-card");
+      const title = card?.querySelector(".source-card-heading strong");
+      if (title) title.textContent = `${noiseTypeLabel(event.target.value)} noise`;
     }
   });
 }
