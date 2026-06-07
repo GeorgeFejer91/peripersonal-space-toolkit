@@ -23,6 +23,14 @@ Use this checklist before finalizing an HTML dashboard change.
 - Do remove/add actions update status badges and validation gates?
 - Does custom mode still force the sequential minimum runnable profile?
 
+## Workflow Segmentation
+
+- Does each one-page website section represent one natural decision stage?
+- Are panels localized to the functional segment that owns them?
+- Are unrelated controls kept out of earlier segments even when there is visual space?
+- Are previews and backend feedback colocated with the decision they support?
+- Do left-rail navigation, status gates, and continue actions follow the same segment order?
+
 ## Frontend Quality
 
 - Are controls dense, calm, and domain-specific?

@@ -37,6 +37,9 @@ In this repo:
    - Prefer explicit control groups, segmented buttons, tables, status chips, splitters, and direct manipulation.
    - Do not add visible instructional prose when the control itself can be clear.
    - Keep one-page navigation and direct panel resizing behavior intact.
+   - Treat one-page website sections as workflow segments. Each segment should represent one natural user decision stage, and panels should stay localized to the segment where that decision is made.
+   - Do not let unrelated controls share a segment just because they fit on screen. Move participant/session/run controls, previews, backend feedback, or review panes to the functional segment that owns them.
+   - For the PPS dashboard, preserve the sequence: profile decision, looming-stimulus builder, trial designer, then run/session review. The looming-stimulus builder owns trajectory controls, preview, source staging/baking, baked-source cards, and bake/render feedback; the trial designer owns filmstrip rows, SOAs, repetitions, blocks, catch percentage, and trial preview.
 
 4. Keep source and file handling local.
    - File selection may happen in browser, but import/store/process must happen through the local companion backend.
@@ -73,6 +76,14 @@ For other projects, map the same roles:
 - Hosted page: optional static UI that must connect back to local companion software.
 
 The safe design pattern is: browser collects decisions, backend validates and acts, domain engine does the heavy work, manifests record what happened.
+
+For UI layout transfer, use workflow segmentation before panel placement:
+
+- Identify the user's required decision stages.
+- Give each stage one anchored website section.
+- Put only the controls, previews, and status feedback needed for that stage inside that section.
+- Keep later-stage setup and review panels lower on the page, even if they are technically related to earlier data.
+- Keep navigation, validation gates, and "continue" actions aligned with these same stages.
 
 ## References
 
