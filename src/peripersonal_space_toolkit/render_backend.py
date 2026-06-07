@@ -319,7 +319,7 @@ def _render_imported_audio_source(
     source: dict[str, Any],
     *,
     config: dict[str, Any],
-    tactile: "Any",
+    tactile: "Any | None",
     output_dir: Path,
     sample_rate: int,
     total_samples: int,
@@ -330,15 +330,19 @@ def _render_imported_audio_source(
     data, source_rate, source_channels = _read_imported_audio_source(source, sample_rate, total_samples)
     if data.shape[1] == 1:
         stereo = np.column_stack([data[:, 0], data[:, 0]])
-        tactile_channel = tactile
     elif data.shape[1] == 2:
         stereo = data[:, :2]
-        tactile_channel = tactile
     else:
         stereo = data[:, :2]
-        tactile_channel = data[:, 2]
     gain = float(source.get("gain", 1.0) or 1.0)
-    rendered = np.column_stack([stereo * gain, tactile_channel])
+    include_tactile = bool(config["tactile"].get("enabled", True))
+    if include_tactile:
+        tactile_channel = data[:, 2] if data.shape[1] > 2 else tactile
+        if tactile_channel is None:
+            tactile_channel = np.zeros(total_samples, dtype=stereo.dtype)
+        rendered = np.column_stack([stereo * gain, tactile_channel])
+    else:
+        rendered = stereo * gain
     peak = float(np.max(np.abs(rendered))) if rendered.size else 0.0
     if peak > OUTPUT_LIMITER_PEAK:
         rendered = rendered / peak * OUTPUT_LIMITER_PEAK
@@ -357,9 +361,9 @@ def _render_imported_audio_source(
         "source_channels": source_channels,
         "duration_s": f"{total_samples / sample_rate:.6f}",
         "sample_rate": sample_rate,
-        "channels": 3,
+        "channels": 3 if include_tactile else 2,
         "tactile_events": len(config["tactile"]["events"]),
-        "tactile_channel": 2,
+        "tactile_channel": 2 if include_tactile else "",
         "peak_dbfs": peak_dbfs,
         "clipping": str(peak >= 1.0).lower(),
         "hrir_positions_used": "",
@@ -369,9 +373,12 @@ def _render_imported_audio_source(
         "second_half_right_rms": "",
         "wav_sha256": sha256_file(wav_path) or "",
         "message": (
-            "Imported local audio source rendered as binaural left/right plus tactile. "
-            "Mono files are duplicated to both ears; stereo files receive the toolkit tactile channel; "
-            "files with 3+ channels preserve channel 3 as tactile."
+            "Imported local audio source rendered as binaural left/right"
+            + (
+                " plus tactile. Mono files are duplicated to both ears; stereo files receive the toolkit tactile channel; files with 3+ channels preserve channel 3 as tactile."
+                if include_tactile
+                else " only. Tactile assembly is deferred until the run/session preparation stage."
+            )
         ),
     }
 
@@ -535,6 +542,7 @@ def build_render_config(
     output_dir: Path,
     samples_per_second: float = 200.0,
     sample_rate: int = DEFAULT_RENDER_SAMPLE_RATE,
+    include_tactile: bool = True,
 ) -> dict[str, Any]:
     trajectory_samples = trajectory_points_with_holds(design.trajectory, samples_per_second=samples_per_second)
     sofa_file = design.sofa_file or DEFAULT_SOFA_FILE
@@ -543,6 +551,7 @@ def build_render_config(
     head_radius_m = head_diameter_m / 2.0
     sources = _noise_rows(design)
     imported_source_count = sum(1 for source in sources if source.get("source_kind") == "imported_audio")
+    tactile_events = _tactile_events(design) if include_tactile else []
     return {
         "schema": "pps-3dti-render-config.v1",
         "renderer": {
@@ -627,12 +636,14 @@ def build_render_config(
             "reference_parameters": design.study_profile_reference_parameters,
         },
         "tactile": {
+            "enabled": bool(include_tactile),
+            "stage": "experiment_render" if include_tactile else "deferred_until_session_preparation",
             "soa_reference": "stimulus_window_onset_s",
-            "output_layout": "multichannel_binaural_plus_tactile",
+            "output_layout": "multichannel_binaural_plus_tactile" if include_tactile else "binaural_auditory_only",
             "channels": {
                 "0": "binaural_left",
                 "1": "binaural_right",
-                "2": "vibrotactile",
+                **({"2": "vibrotactile"} if include_tactile else {}),
             },
             "legacy_two_channel_layout": {
                 "supported_for_study5_replication_only": True,
@@ -650,7 +661,7 @@ def build_render_config(
                 "decay_db": -22,
                 "peak_normalization": 0.95,
             },
-            "events": _tactile_events(design),
+            "events": tactile_events,
         },
         "protocol": {
             "summary": protocol_summary(design),
@@ -791,7 +802,8 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
     window = np.sqrt(np.hanning(frame_samples))
     if not np.any(window):
         window = np.ones(frame_samples, dtype=float)
-    tactile = _add_tactile_channel(config, sample_rate, total_samples)
+    include_tactile = bool(config["tactile"].get("enabled", True))
+    tactile = _add_tactile_channel(config, sample_rate, total_samples) if include_tactile else None
     rows: list[dict[str, Any]] = []
     wav_paths: list[Path] = []
 
@@ -833,7 +845,7 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
             hop_samples=hop_samples,
             window=window,
         )
-        rendered = np.column_stack([stereo, tactile])
+        rendered = np.column_stack([stereo, tactile]) if include_tactile and tactile is not None else stereo
         first_half = stereo[: total_samples // 2, :]
         second_half = stereo[total_samples // 2 :, :]
         first_rms = np.sqrt(np.mean(first_half * first_half, axis=0)) if len(first_half) else np.zeros(2)
@@ -855,9 +867,9 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
                 **imported_metadata,
                 "duration_s": f"{total_samples / sample_rate:.6f}",
                 "sample_rate": sample_rate,
-                "channels": 3,
+                "channels": 3 if include_tactile else 2,
                 "tactile_events": len(config["tactile"]["events"]),
-                "tactile_channel": 2,
+                "tactile_channel": 2 if include_tactile else "",
                 "peak_dbfs": peak_dbfs,
                 "clipping": str(peak >= 1.0).lower(),
                 "hrir_positions_used": len(used_hrir_indices),
@@ -869,6 +881,7 @@ def render_with_python_sofa_reference(config: dict[str, Any], output_dir: Path, 
                 "message": (
                     "Rendered with the Python SOFA/FABIAN reference engine from the same "
                     f"3DTI-compatible config; HRIR positions used: {len(used_hrir_indices)}."
+                    + ("" if include_tactile else " Tactile channel generation was deferred for this auditory-only bake.")
                 ),
             }
         )
@@ -902,6 +915,8 @@ def write_manifest(
         "trajectory_samples": len(config["trajectory"]["samples"]),
         "source": config["source"],
         "tactile_events": {
+            "enabled": bool(config["tactile"].get("enabled", True)),
+            "stage": config["tactile"].get("stage", ""),
             "count": len(config["tactile"]["events"]),
             "path": str(tactile_events_path) if tactile_events_path else None,
             "sha256": sha256_file(tactile_events_path) if tactile_events_path else None,
@@ -951,6 +966,8 @@ def postprocess_native_manifest(
             "listener": config["listener"],
             "study_profile": config.get("study_profile", {}),
             "tactile_events": {
+                "enabled": bool(config["tactile"].get("enabled", True)),
+                "stage": config["tactile"].get("stage", ""),
                 "path": str(tactile_events_path),
                 "sha256": sha256_file(tactile_events_path),
                 "count": len(config["tactile"]["events"]),
@@ -975,13 +992,14 @@ def render_design_with_3dti(
     backend_executable: Path | None = None,
     dry_run: bool = False,
     engine: str = "auto",
+    include_tactile: bool = True,
 ) -> RenderResult:
     if engine not in RENDER_ENGINES:
         raise ValueError(f"Unsupported render engine: {engine}")
     design = load_render_design(design_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     backend = resolve_backend_executable(backend_executable)
-    config = build_render_config(design, seed=seed, output_dir=output_dir)
+    config = build_render_config(design, seed=seed, output_dir=output_dir, include_tactile=include_tactile)
     config_path = output_dir / "render_config.3dti.json"
     manifest_path = output_dir / "render_manifest.json"
     qc_path = output_dir / "render_qc.csv"
@@ -1013,6 +1031,36 @@ def render_design_with_3dti(
             qc_path,
             backend,
             tactile_events_path=tactile_events_path,
+        )
+
+    if engine == "python-sofa-reference":
+        wav_paths = render_with_python_sofa_reference(config, output_dir, qc_path)
+        message = (
+            "Rendered with the Python SOFA/FABIAN reference engine from the same saved "
+            "3DTI-compatible trajectory config."
+        )
+        if not include_tactile:
+            message += " Tactile cue generation was deferred for this auditory-only stimulus bake."
+        write_manifest(
+            manifest_path,
+            status="rendered_reference",
+            config=config,
+            backend_executable=backend,
+            message=message,
+            render_engine="python-sofa-reference",
+            wav_paths=wav_paths,
+            tactile_events_path=tactile_events_path,
+        )
+        return RenderResult(
+            "rendered_reference",
+            0,
+            output_dir,
+            config_path,
+            manifest_path,
+            qc_path,
+            backend,
+            tuple(wav_paths),
+            tactile_events_path,
         )
 
     if uses_imported_audio:

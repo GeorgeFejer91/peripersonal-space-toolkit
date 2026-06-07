@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import csv
 import json
 import time
 from importlib.resources import files
@@ -298,11 +299,11 @@ def test_dashboard_bake_stimulus_job_adds_source_after_render(tmp_path: Path, mo
         }
     ]
 
-    def fake_render(design_path, output_dir, *, seed, **_kwargs):
+    def fake_render(design_path, output_dir, *, seed, engine="auto", include_tactile=True, **_kwargs):
         design_data = json.loads(Path(design_path).read_text(encoding="utf-8"))
         label = design_data["noises"][0]["label"]
         wav_path = Path(output_dir) / "looming_manual_blue.wav"
-        sf.write(wav_path, np.zeros((441, 3), dtype=np.float32), 44100)
+        sf.write(wav_path, np.zeros((441, 2), dtype=np.float32), 44100)
         manifest = Path(output_dir) / "render_manifest.json"
         qc = Path(output_dir) / "render_qc.csv"
         tactile = Path(output_dir) / "render_tactile_events.csv"
@@ -314,6 +315,8 @@ def test_dashboard_bake_stimulus_job_adds_source_after_render(tmp_path: Path, mo
         tactile.write_text("", encoding="utf-8")
         assert label == "Manual blue"
         assert seed == custom["design"]["protocol"]["random_seed"]
+        assert engine == "python-sofa-reference"
+        assert include_tactile is False
         return RenderResult("rendered_reference", 0, Path(output_dir), Path(design_path), manifest, qc, wav_paths=(wav_path,), tactile_events_path=tactile)
 
     monkeypatch.setattr(dashboard_app.render_backend, "render_design_with_3dti", fake_render)
@@ -330,10 +333,36 @@ def test_dashboard_bake_stimulus_job_adds_source_after_render(tmp_path: Path, mo
 
     assert done["status"] == "succeeded"
     assert done["result"]["local_only"] is True
+    assert done["result"]["include_tactile"] is False
     assert done["result"]["source_kind"] == "generated_noise"
     assert any(noise["label"] == "Manual blue" and noise["noise_type"] == "blue" for noise in state["design"]["noises"])
     assert state["render"]["wav_count"] >= 1
     assert state["custom_workflow"]["ready_to_render"] is True
+
+
+def test_auditory_only_bake_render_writes_stereo_wav(tmp_path: Path):
+    design = _compact_design()
+    design_path = tmp_path / "design.json"
+    render_dir = tmp_path / "render"
+    save_design(design, design_path)
+
+    result = dashboard_app.render_backend.render_design_with_3dti(
+        design_path,
+        render_dir,
+        seed=20250604,
+        engine="python-sofa-reference",
+        include_tactile=False,
+    )
+
+    assert result.wav_paths
+    assert sf.info(str(result.wav_paths[0])).channels == 2
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["tactile_events"]["enabled"] is False
+    assert manifest["tactile_events"]["count"] == 0
+    qc_rows = list(csv.DictReader(result.qc_path.open(encoding="utf-8")))
+    assert qc_rows[0]["channels"] == "2"
+    assert qc_rows[0]["tactile_events"] == "0"
+    assert qc_rows[0]["tactile_channel"] == ""
 
 
 def test_dashboard_open_folder_is_local_backend_action(tmp_path: Path, monkeypatch):

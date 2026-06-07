@@ -260,7 +260,13 @@ class DashboardController:
             render_dir.mkdir(parents=True, exist_ok=True)
             design_path = render_dir / f"stimulus_design.bake_{_slug(label)}.json"
             save_design(bake_design, design_path)
-            result = render_backend.render_design_with_3dti(design_path, render_dir, seed=seed)
+            result = render_backend.render_design_with_3dti(
+                design_path,
+                render_dir,
+                seed=seed,
+                engine="python-sofa-reference",
+                include_tactile=False,
+            )
             wav_path = _baked_wav_path(result, label)
             if wav_path is None or not wav_path.exists():
                 raise RuntimeError(f"Bake did not create a WAV for {label}.")
@@ -292,6 +298,7 @@ class DashboardController:
                 "wav_path": str(wav_path),
                 "manifest_path": str(result.manifest_path),
                 "qc_path": str(result.qc_path),
+                "include_tactile": False,
                 "local_only": True,
                 "message": "Stimulus was baked by the local companion backend; no online upload was performed.",
             }

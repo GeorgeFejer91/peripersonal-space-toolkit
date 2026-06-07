@@ -56,7 +56,7 @@ The browser dashboard is an orchestrator only. It must not upload stimulus files
 
 Imported dashboard audio sources must distinguish dry tones that the backend spatializes along the selected trajectory from already looming/control audio that should be preserved as baked local audio.
 
-Audio generation is a pre-run workflow, not a participant-run workflow. The dashboard should let researchers bake looming stimuli early from the selected trajectory and source material through the local 3DTI/reference backend, then prepare any final block/session audio before Focus Mode starts. Native participant timing should consume already prepared WAVs and manifests rather than generating, spatializing, or assembling stimuli during the timed run.
+Audio generation is a pre-run workflow, not a participant-run workflow. The dashboard should let researchers bake looming auditory stimuli early from the selected trajectory and source material through the local 3DTI/reference backend. This bake stage is auditory-only/binaural; tactile cue channels are not part of the baked source stimulus and should be introduced later from the trial/SOA schedule during final session or block preparation. Native participant timing should consume already prepared WAVs and manifests rather than generating, spatializing, or assembling stimuli during the timed run.
 
 The PySide6/Qt designer remains available as `pps-design` / `windows\Launch_Stimulus_Designer.bat` for comparison and fallback. Keep its nested `QSplitter` workspaces and embedded local Three.js trajectory viewer working, but new researcher-facing workflow polish should prefer the HTML dashboard unless the user asks for Qt specifically.
 
