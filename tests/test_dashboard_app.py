@@ -102,26 +102,26 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="generated-noise-select"' in html
     assert 'id="noise-list"' in html
     assert 'id="audio-list"' in html
-    assert 'id="assembly-list"' in html
-    assert 'id="builder-add-noise"' in html
-    assert 'id="builder-add-audio"' in html
-    assert 'id="builder-noise-type"' in html
+    assert 'id="assembly-list"' not in html
+    assert 'id="builder-add-noise"' not in html
+    assert 'id="builder-add-audio"' not in html
+    assert 'id="builder-noise-type"' not in html
     assert 'id="source-counts"' in html
     assert 'id="add-audio-spatialize"' not in html
     assert 'id="add-audio-preserve"' not in html
     assert "Stimulus Selection" in html
-    assert "Custom Stimulus Builder" in html
+    assert "Custom Stimulus Builder" not in html
     assert "Dry Custom Tone" in html
     assert "Already Looming / Control" in html
     assert "Instruction Snippet" in html
     assert "IMPORTED_AUDIO_HANDLING" in app_js
     assert "PROCEDURAL_NOISE_TYPES" in app_js
     assert "STIMULUS_SNIPPET_PLACEMENTS" in app_js
-    assert "STIMULUS_MOTION_MODES" in app_js
+    assert "STIMULUS_MOTION_MODES" not in app_js
     assert "noise-source-card" in app_js
     assert "audio-source-card" in app_js
-    assert "assembly-list" in app_js
-    assert "dragstart" in app_js
+    assert "assembly-list" not in app_js
+    assert "dragstart" not in app_js
     assert "START_MARKER_COLOR" in viewer_js
     assert "END_MARKER_COLOR" in viewer_js
     assert "end_marker_color" in viewer_js

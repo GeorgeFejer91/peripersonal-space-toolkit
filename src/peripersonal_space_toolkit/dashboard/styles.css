@@ -577,81 +577,6 @@ select:focus {
   padding: 9px;
 }
 
-.stimulus-builder {
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  padding: 12px 0;
-  margin-top: 10px;
-}
-
-.builder-action-row {
-  display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto auto;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.assembly-list {
-  display: grid;
-  gap: 8px;
-}
-
-.assembly-item,
-.assembly-empty {
-  min-height: 40px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #ffffff;
-  padding: 8px 10px;
-}
-
-.assembly-item {
-  display: grid;
-  grid-template-columns: 42px 28px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  cursor: grab;
-}
-
-.assembly-item.dragging {
-  opacity: 0.65;
-  border-color: var(--primary);
-}
-
-.assembly-drag-handle,
-.assembly-index {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.assembly-index {
-  text-align: right;
-}
-
-.assembly-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.assembly-item strong {
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.assembly-item span,
-.assembly-empty {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.assembly-motion {
-  min-width: 174px;
-}
-
 .source-card-heading {
   min-height: 32px;
   display: flex;
@@ -995,15 +920,6 @@ select:focus {
     grid-column: span 2;
   }
 
-  .assembly-item {
-    grid-template-columns: 42px 28px minmax(0, 1fr);
-  }
-
-  .assembly-motion {
-    grid-column: 3;
-    justify-self: start;
-  }
-
   .workspace-splitter {
     display: none;
   }
@@ -1036,18 +952,4 @@ select:focus {
     grid-column: span 1;
   }
 
-  .builder-action-row,
-  .assembly-item {
-    grid-template-columns: 1fr;
-  }
-
-  .assembly-index,
-  .assembly-drag-handle {
-    text-align: left;
-  }
-
-  .assembly-motion {
-    grid-column: auto;
-    min-width: 0;
-  }
 }
