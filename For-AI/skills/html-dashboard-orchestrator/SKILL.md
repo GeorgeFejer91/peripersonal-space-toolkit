@@ -17,6 +17,7 @@ In this repo:
 - The embedded trajectory viewer lives in `src/peripersonal_space_toolkit/viewer/`.
 - The companion backend lives in `src/peripersonal_space_toolkit/dashboard_app.py`.
 - Experiment schemas and render behavior live in `src/peripersonal_space_toolkit/design.py` and `src/peripersonal_space_toolkit/render_backend.py`.
+- Preload asset readiness lives in `assets/preloads/preload_inventory.json`; the browser may display status, but the local companion verifies, downloads, or bakes profile assets.
 - Public/hosted static behavior must still use relative assets and connect to `127.0.0.1` for backend actions.
 
 ## Workflow

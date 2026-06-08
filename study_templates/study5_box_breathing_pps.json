@@ -15,6 +15,9 @@
     "exhale_instruction_asset": "assets/breathing/Exhale-2-3-4-hold_FIXED.wav",
     "trial_unit_duration_s": 8.0,
     "looming_stimulus_window_s": 4.0,
+    "looming_assets_bundled": true,
+    "preload_inventory": "assets/preloads/preload_inventory.json",
+    "preload_asset_manifest": "assets/preloads/study5_box_breathing_pps/preload_manifest.json",
     "movement_duration_s": 3.0,
     "movement_start_distance_cm": 110.0,
     "movement_end_distance_cm": 10.0,
@@ -26,45 +29,45 @@
   "design": {
     "name": "Study 5 PPS box-breathing design",
     "sofa_file": "assets/0. Head-Related Impulse Response (HRIR) model/FABIAN_HRIR_measured_HATO_0.sofa",
-    "noises": [
+    "noises": [],
+    "custom_looming_files": [
       {
         "label": "Pink frontal",
-        "noise_type": "pink",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 0.0,
+        "path": "assets/preloads/study5_box_breathing_pps/looming_Pink_frontal.wav",
+        "target_duration_s": 4.0,
+        "render_mode": "preserve",
         "gain": 1.0,
         "sequence_order": 2,
         "motion_mode": "looming"
       },
       {
         "label": "Blue frontal",
-        "noise_type": "blue",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 0.0,
+        "path": "assets/preloads/study5_box_breathing_pps/looming_Blue_frontal.wav",
+        "target_duration_s": 4.0,
+        "render_mode": "preserve",
         "gain": 1.0,
         "sequence_order": 2,
         "motion_mode": "looming"
       },
       {
         "label": "White frontal",
-        "noise_type": "white",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 0.0,
+        "path": "assets/preloads/study5_box_breathing_pps/looming_White_frontal.wav",
+        "target_duration_s": 4.0,
+        "render_mode": "preserve",
         "gain": 1.0,
         "sequence_order": 2,
         "motion_mode": "looming"
       },
       {
         "label": "Brown frontal",
-        "noise_type": "brown",
-        "azimuth_deg": 0.0,
-        "elevation_deg": 0.0,
+        "path": "assets/preloads/study5_box_breathing_pps/looming_Brown_frontal.wav",
+        "target_duration_s": 4.0,
+        "render_mode": "preserve",
         "gain": 1.0,
         "sequence_order": 2,
         "motion_mode": "looming"
       }
     ],
-    "custom_looming_files": [],
     "prestimulus_files": [
       {
         "label": "Inhale instruction",
@@ -203,6 +206,10 @@
     {
       "field": "instruction assets",
       "source": "Bundled owned Study 5 breathing instruction WAVs under assets/breathing; release audit and tests enforce 4.000 s at 44100 Hz."
+    },
+    {
+      "field": "prebaked looming assets",
+      "source": "Bundled owned Study 5 auditory-only looming WAVs under assets/preloads/study5_box_breathing_pps; the preload inventory records the original generated-noise recipe and SHA-256 hashes."
     },
     {
       "field": "visible trial assembly",

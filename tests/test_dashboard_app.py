@@ -100,6 +100,7 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="zoom-in-camera"' in html
     assert 'id="zoom-out-camera"' in html
     assert 'id="fit-radius-camera"' in html
+    assert 'id="preload-asset-status"' in html
     assert "Study/profile preload" in html
     assert "Published preload" not in html
     assert 'id="import-audio-spatialize"' in html
@@ -134,6 +135,7 @@ def test_dashboard_static_assets_are_packaged():
     assert "Already Looming / Control" in html
     assert "Instruction Snippet" in html
     assert "/api/stimulus/bake" in app_js
+    assert "renderPreloadAssetStatus" in app_js
     assert "/api/local/open-folder" in app_js
     assert "data-open-folder" in app_js
     assert "Open Folder" in app_js
@@ -184,6 +186,16 @@ def test_dashboard_pages_companion_contract(tmp_path: Path):
     assert health.json()["service"] == "pps-dashboard-companion"
     assert health.headers["access-control-allow-origin"] == "https://georgefejer91.github.io"
 
+    preloads = client.get("/api/preloads").json()
+    assert preloads["schema"] == "pps-preload-asset-inventory.v1"
+    study5 = next(item for item in preloads["profiles"] if item["template_id"] == "study5_box_breathing_pps")
+    assert study5["status"] == "ready"
+    assert study5["asset_mode"] == "bundled_local"
+
+    synced = client.post("/api/preloads/study5_box_breathing_pps/sync").json()
+    assert synced["status"] == "ready"
+    assert synced["ready_asset_count"] == 4
+
 
 def test_dashboard_loads_unpublished_study5_preload_with_instruction_rows(tmp_path: Path):
     client = _client(tmp_path)
@@ -194,10 +206,21 @@ def test_dashboard_loads_unpublished_study5_preload_with_instruction_rows(tmp_pa
     assert loaded["selected_template"] == "study5_box_breathing_pps"
     assert design["study_profile_title"] == "Study 5 PPS box-breathing profile"
     assert design["study_profile_reference_parameters"]["publication_status"] == "unpublished_lab_profile"
+    assert design["study_profile_reference_parameters"]["looming_assets_bundled"] is True
     assert loaded["custom_workflow"]["is_custom"] is False
     assert [clip["label"] for clip in design["prestimulus_files"]] == ["Inhale instruction", "Exhale instruction"]
     assert [clip["target_duration_s"] for clip in design["prestimulus_files"]] == [4.0, 4.0]
     assert all(clip["path"].startswith("assets/breathing/") for clip in design["prestimulus_files"])
+    assert design["noises"] == []
+    assert [asset["label"] for asset in design["custom_looming_files"]] == [
+        "Pink frontal",
+        "Blue frontal",
+        "White frontal",
+        "Brown frontal",
+    ]
+    assert all(asset["path"].startswith("assets/preloads/study5_box_breathing_pps/") for asset in design["custom_looming_files"])
+    assert loaded["preload_inventory"]["status"] == "ready"
+    assert loaded["preflight"]["render_ready"] is True
 
     strips = design["protocol"]["trial_strips"]
     assert [strip["label"] for strip in strips] == ["Inhale row", "Exhale row"]
@@ -215,7 +238,8 @@ def test_dashboard_state_templates_and_design_update(tmp_path: Path):
     state = client.get("/api/state").json()
     assert state["design"]["name"]
     assert state["templates"]
-    assert state["render"]["wav_count"] == 1
+    assert state["preload_inventory"]["status"] == "ready"
+    assert state["render"]["wav_count"] >= 4
 
     template_id = state["templates"][0]["template_id"]
     loaded = client.post(f"/api/templates/{template_id}/load").json()

@@ -52,6 +52,7 @@ FORBIDDEN_SUFFIXES = {".aup3", ".apk", ".xdf", ".sofa", ".hrir", ".mp3", ".flac"
 ALLOWED_WAV_PREFIXES = {
     Path("assets") / "breathing",
     Path("assets") / "click",
+    Path("assets") / "preloads",
 }
 SPOKEN_ASSETS = [
     "Inhale-2-3-4-hold_FIXED.wav",

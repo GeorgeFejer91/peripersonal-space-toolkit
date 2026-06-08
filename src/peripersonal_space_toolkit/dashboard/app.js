@@ -198,6 +198,7 @@ function renderStudy() {
   }
   $("design-name").value = state.design.name || "";
   renderProfileSummary();
+  renderPreloadAssetStatus();
 }
 
 function renderProfileSummary() {
@@ -209,6 +210,28 @@ function renderProfileSummary() {
   summary.innerHTML = href
     ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a>`
     : "";
+}
+
+function renderPreloadAssetStatus() {
+  const badge = $("preload-asset-status");
+  if (!badge) return;
+  const selectedId = $("template-select").value;
+  if (!selectedId || selectedId === CUSTOM_TEMPLATE_ID) {
+    badge.hidden = true;
+    return;
+  }
+  const current = state.templates.find((item) => item.template_id === selectedId);
+  const status = current?.preload_asset_status || state.preload_inventory || {};
+  const value = status.status || "not_indexed";
+  const ready = Boolean(status.ready);
+  badge.hidden = false;
+  badge.textContent = ready
+    ? `${status.ready_asset_count || status.asset_count || 0} local assets`
+    : value === "recipe_only"
+      ? "recipe only"
+      : value.replace(/_/g, " ");
+  badge.className = `status-label ${ready ? "ready" : value === "recipe_only" ? "" : "required"}`;
+  badge.title = status.message || "";
 }
 
 function renderStimulus() {

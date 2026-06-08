@@ -36,6 +36,7 @@ Primary users are cognitive neuroscience and psychology researchers who need to 
 - `Example-configs/` may contain reference archives for external-study stimulus-generation materials; verify redistribution rights before treating any bundled third-party WAVs or scripts as public release assets.
 - `study_templates/` contains preloadable literature-backed template JSON files.
 - `assets/` contains only small owned seed assets intended for publication.
+- `assets/preloads/` contains the public preload asset inventory and any approved owned prebaked profile assets. `study5_box_breathing_pps` currently has bundled auditory-only looming WAVs here; other profiles may be inventory/recipe-only until their assets are explicitly approved or generated locally.
 - `src/peripersonal_space_toolkit/assets/` contains packaged app identity assets such as the PPS Toolkit SVG/PNG/ICO logo used by Qt windows, the dashboard desktop shortcut, and the local dashboard favicon.
 - `data/sample/` contains deidentified sample CSVs.
 - `artifacts/`, `local_data/`, and `models/` are ignored local/generated folders.
@@ -59,6 +60,8 @@ The browser dashboard is an orchestrator only. It must not upload stimulus files
 Imported dashboard audio sources must distinguish dry tones that the backend spatializes along the selected trajectory from already looming/control audio that should be preserved as baked local audio.
 
 Audio generation is a pre-run workflow, not a participant-run workflow. The dashboard should let researchers bake looming auditory stimuli early from the selected trajectory and source material through the local 3DTI/reference backend. This bake stage is auditory-only/binaural; tactile cue channels are not part of the baked source stimulus and should be introduced later from the trial/SOA schedule during final session or block preparation. Native participant timing should consume already prepared WAVs and manifests rather than generating, spatializing, or assembling stimuli during the timed run.
+
+Preload profiles should advertise their asset state through `assets/preloads/preload_inventory.json`. The inventory is safe for GitHub/GitHub Pages publication because it contains hashes, relative paths, source recipes, and retrieval policy, not participant data. The local companion backend verifies, downloads, or bakes assets; the browser surface only displays the status and requests the local action. Study 5 is the working local profile and ships with its owned auditory-only looming WAVs under `assets/preloads/study5_box_breathing_pps/`.
 
 The PySide6/Qt designer remains available as `pps-design` / `windows\Launch_Stimulus_Designer.bat` for comparison and fallback. Keep its nested `QSplitter` workspaces and embedded local Three.js trajectory viewer working, but new researcher-facing workflow polish should prefer the HTML dashboard unless the user asks for Qt specifically.
 

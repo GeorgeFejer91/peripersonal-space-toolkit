@@ -43,7 +43,15 @@ from .design import (
     trajectory_endpoints_xyz,
     validate_design,
 )
-from .session_runner import DEFAULT_RENDER_DIR, DEFAULT_SESSION_ROOT, RunPackage, prepare_run_package, preflight_run_package, rendered_wavs
+from .session_runner import (
+    DEFAULT_RENDER_DIR,
+    DEFAULT_SESSION_ROOT,
+    RunPackage,
+    available_stimulus_wavs,
+    prepare_run_package,
+    preflight_run_package,
+    rendered_wavs,
+)
 from .templates import (
     DEFAULT_STUDY_TEMPLATE_ID,
     StudyTemplate,
@@ -52,6 +60,7 @@ from .templates import (
     study_template_citation_label,
     study_template_csl_json,
 )
+from .preload_inventory import ensure_preload_assets, load_preload_inventory, preload_inventory_payload, profile_asset_status
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +138,7 @@ class DashboardController:
         self.template_dir = Path(template_dir)
         self.import_dir = Path(import_dir)
         self.templates = load_templates(self.template_dir)
+        self.preload_inventory = load_preload_inventory(REPO_ROOT)
         self.design = self._load_initial_design()
         self.participant_id = "P001"
         self.current_run_package: RunPackage | None = None
@@ -163,7 +173,7 @@ class DashboardController:
             "design": design_to_dict(design),
             "design_path": str(self.design_path),
             "participant_id": participant_id,
-            "templates": [_template_to_dict(template) for template in self.templates],
+            "templates": self.templates_payload(),
             "selected_template": design.study_profile_id,
             "custom_workflow": _custom_workflow_status(design, participant_id),
             "trajectory_controls": _trajectory_controls(design),
@@ -172,14 +182,42 @@ class DashboardController:
             "trial_preview": _trial_preview_rows(design),
             "participant_orders": _participant_orders(design),
             "validation": validate_design(design),
-            "render": _render_status(self.render_dir),
+            "render": _render_status(self.render_dir, design),
+            "preload_inventory": profile_asset_status(
+                design.study_profile_id,
+                inventory=self.preload_inventory,
+                repo_root=REPO_ROOT,
+            ),
             "preflight": preflight,
             "session": _package_to_dict(package),
             "jobs": [_job_to_dict(job) for job in self.jobs.recent()],
         }
 
     def templates_payload(self) -> list[dict[str, Any]]:
-        return [_template_to_dict(template) for template in self.templates]
+        return [
+            _template_to_dict(
+                template,
+                asset_status=profile_asset_status(
+                    template.template_id,
+                    inventory=self.preload_inventory,
+                    repo_root=REPO_ROOT,
+                ),
+            )
+            for template in self.templates
+        ]
+
+    def preload_inventory_payload(self) -> dict[str, Any]:
+        return preload_inventory_payload(
+            [template.template_id for template in self.templates],
+            repo_root=REPO_ROOT,
+        )
+
+    def sync_preload_assets(self, template_id: str) -> dict[str, Any]:
+        return ensure_preload_assets(
+            template_id,
+            inventory=self.preload_inventory,
+            repo_root=REPO_ROOT,
+        )
 
     def load_template(self, template_id: str) -> dict[str, Any]:
         if template_id in CUSTOM_TEMPLATE_IDS:
@@ -187,6 +225,7 @@ class DashboardController:
         template = next((item for item in self.templates if item.template_id == template_id), None)
         if template is None:
             raise KeyError(template_id)
+        self.sync_preload_assets(template_id)
         with self._lock:
             self.design = _copy_design(template.design)
             self.current_run_package = None
@@ -531,6 +570,14 @@ def create_app(
     def api_templates() -> list[dict[str, Any]]:
         return controller.templates_payload()
 
+    @app.get("/api/preloads")
+    def api_preloads() -> dict[str, Any]:
+        return controller.preload_inventory_payload()
+
+    @app.post("/api/preloads/{template_id}/sync")
+    def api_sync_preload(template_id: str) -> dict[str, Any]:
+        return controller.sync_preload_assets(template_id)
+
     @app.post("/api/templates/{template_id}/load")
     def api_load_template(template_id: str) -> dict[str, Any]:
         try:
@@ -692,10 +739,10 @@ def _participant_orders(design: StimulusDesign) -> list[dict[str, Any]]:
     return [{"participant": participant, "block_order": " -> ".join(blocks)} for participant, blocks in list(orders.items())[:80]]
 
 
-def _render_status(render_dir: Path) -> dict[str, Any]:
+def _render_status(render_dir: Path, design: StimulusDesign | None = None) -> dict[str, Any]:
     manifest_path = Path(render_dir) / "render_manifest.json"
     manifest = _load_json(manifest_path)
-    wavs = rendered_wavs(render_dir)
+    wavs = available_stimulus_wavs(design, render_dir) if design is not None else rendered_wavs(render_dir)
     return {
         "render_dir": str(render_dir),
         "manifest_path": str(manifest_path),
@@ -926,8 +973,8 @@ def _custom_run_missing(participant_id: str) -> list[str]:
     return []
 
 
-def _template_to_dict(template: StudyTemplate) -> dict[str, Any]:
-    return {
+def _template_to_dict(template: StudyTemplate, *, asset_status: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = {
         "template_id": template.template_id,
         "title": template.title,
         "citation_label": study_template_citation_label(template),
@@ -939,6 +986,9 @@ def _template_to_dict(template: StudyTemplate) -> dict[str, Any]:
         "verification_status": template.verification_status,
         "notes": template.notes,
     }
+    if asset_status is not None:
+        payload["preload_asset_status"] = asset_status
+    return payload
 
 
 def _package_to_dict(package: RunPackage | None) -> dict[str, Any] | None:

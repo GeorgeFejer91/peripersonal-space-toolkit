@@ -1,0 +1,145 @@
+{
+  "schema": "pps-preload-asset-inventory.v1",
+  "base_url": "https://georgefejer91.github.io/peripersonal-space-toolkit/assets/preloads",
+  "inventory_policy": "GitHub stores the manifest and owned preload assets. The browser never uploads local stimulus files or participant/session artifacts; the local companion verifies, downloads, or bakes assets.",
+  "default_policy": {
+    "asset_mode": "not_indexed",
+    "retrieval_strategy": "generate_on_local_companion",
+    "local_only": true
+  },
+  "profiles": [
+    {
+      "template_id": "barumerli_2026_arm_movement_exp1",
+      "title": "Looming/receding PPS during arm movement, Experiment 1",
+      "asset_mode": "recipe_only",
+      "retrieval_strategy": "generate_on_local_companion",
+      "profile_manifest": "",
+      "local_only": true,
+      "source_recipe_count": 1,
+      "message": "Profile is indexed on GitHub; bundled looming WAV assets are not stored locally yet and should be baked by the local companion before running.",
+      "assets": []
+    },
+    {
+      "template_id": "barumerli_2026_arm_movement_exp2",
+      "title": "Looming/receding PPS during arm movement, Experiment 2",
+      "asset_mode": "recipe_only",
+      "retrieval_strategy": "generate_on_local_companion",
+      "profile_manifest": "",
+      "local_only": true,
+      "source_recipe_count": 1,
+      "message": "Profile is indexed on GitHub; bundled looming WAV assets are not stored locally yet and should be baked by the local companion before running.",
+      "assets": []
+    },
+    {
+      "template_id": "canzoneri_2012_dynamic_sounds",
+      "title": "Dynamic sounds capture PPS boundaries",
+      "asset_mode": "recipe_only",
+      "retrieval_strategy": "generate_on_local_companion",
+      "profile_manifest": "",
+      "local_only": true,
+      "source_recipe_count": 1,
+      "message": "Profile is indexed on GitHub; bundled looming WAV assets are not stored locally yet and should be baked by the local companion before running.",
+      "assets": []
+    },
+    {
+      "template_id": "matsuda_2021_four_directions",
+      "title": "Front, rear, left, and right audio-tactile PPS",
+      "asset_mode": "recipe_only",
+      "retrieval_strategy": "generate_on_local_companion",
+      "profile_manifest": "",
+      "local_only": true,
+      "source_recipe_count": 1,
+      "message": "Profile is indexed on GitHub; bundled looming WAV assets are not stored locally yet and should be baked by the local companion before running.",
+      "assets": []
+    },
+    {
+      "template_id": "noel_2015_bodily_self",
+      "title": "PPS as the space of the bodily self",
+      "asset_mode": "recipe_only",
+      "retrieval_strategy": "generate_on_local_companion",
+      "profile_manifest": "",
+      "local_only": true,
+      "source_recipe_count": 1,
+      "message": "Profile is indexed on GitHub; bundled looming WAV assets are not stored locally yet and should be baked by the local companion before running.",
+      "assets": []
+    },
+    {
+      "template_id": "study5_box_breathing_pps",
+      "title": "Study 5 PPS box-breathing profile",
+      "asset_mode": "bundled_local",
+      "retrieval_strategy": "bundled_or_download_from_github_pages",
+      "profile_manifest": "assets/preloads/study5_box_breathing_pps/preload_manifest.json",
+      "local_only": true,
+      "message": "Study 5 ships with local auditory-only looming source WAVs for the current lab workflow.",
+      "assets": [
+        {
+          "label": "Pink frontal",
+          "path": "assets/preloads/study5_box_breathing_pps/looming_Pink_frontal.wav",
+          "url": "https://georgefejer91.github.io/peripersonal-space-toolkit/assets/preloads/study5_box_breathing_pps/looming_Pink_frontal.wav",
+          "sha256": "2ff7c2286a5c04dfebab6e1ea33738849776bf3060e6acc2ee0ee66016e1e772",
+          "duration_s": 4.0,
+          "sample_rate": 44100,
+          "channels": 2,
+          "source_kind": "generated_noise",
+          "noise_type": "pink",
+          "motion_mode": "looming",
+          "render_mode": "preserve",
+          "include_tactile": false
+        },
+        {
+          "label": "Blue frontal",
+          "path": "assets/preloads/study5_box_breathing_pps/looming_Blue_frontal.wav",
+          "url": "https://georgefejer91.github.io/peripersonal-space-toolkit/assets/preloads/study5_box_breathing_pps/looming_Blue_frontal.wav",
+          "sha256": "e0a330251805dcb37b092b4719707ba06f66a5b9bf45f98ef397fdfbcdfc8b65",
+          "duration_s": 4.0,
+          "sample_rate": 44100,
+          "channels": 2,
+          "source_kind": "generated_noise",
+          "noise_type": "blue",
+          "motion_mode": "looming",
+          "render_mode": "preserve",
+          "include_tactile": false
+        },
+        {
+          "label": "White frontal",
+          "path": "assets/preloads/study5_box_breathing_pps/looming_White_frontal.wav",
+          "url": "https://georgefejer91.github.io/peripersonal-space-toolkit/assets/preloads/study5_box_breathing_pps/looming_White_frontal.wav",
+          "sha256": "9efe872d368f1f1e1ac126ed315c6534cbbd9c29f5803310e9dbde347d05393a",
+          "duration_s": 4.0,
+          "sample_rate": 44100,
+          "channels": 2,
+          "source_kind": "generated_noise",
+          "noise_type": "white",
+          "motion_mode": "looming",
+          "render_mode": "preserve",
+          "include_tactile": false
+        },
+        {
+          "label": "Brown frontal",
+          "path": "assets/preloads/study5_box_breathing_pps/looming_Brown_frontal.wav",
+          "url": "https://georgefejer91.github.io/peripersonal-space-toolkit/assets/preloads/study5_box_breathing_pps/looming_Brown_frontal.wav",
+          "sha256": "9d7c04b7fbb2ac1b36ac86ed3947fb59ffccf7e81268c645726b467ade6e9a87",
+          "duration_s": 4.0,
+          "sample_rate": 44100,
+          "channels": 2,
+          "source_kind": "generated_noise",
+          "noise_type": "brown",
+          "motion_mode": "looming",
+          "render_mode": "preserve",
+          "include_tactile": false
+        }
+      ]
+    },
+    {
+      "template_id": "tonelli_2019_echolocation",
+      "title": "Enhanced audio-tactile PPS after echolocation training",
+      "asset_mode": "recipe_only",
+      "retrieval_strategy": "generate_on_local_companion",
+      "profile_manifest": "",
+      "local_only": true,
+      "source_recipe_count": 1,
+      "message": "Profile is indexed on GitHub; bundled looming WAV assets are not stored locally yet and should be baked by the local companion before running.",
+      "assets": []
+    }
+  ]
+}

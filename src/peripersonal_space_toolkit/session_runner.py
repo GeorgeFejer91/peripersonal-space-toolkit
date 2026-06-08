@@ -135,6 +135,27 @@ def rendered_wavs(render_dir: Path = DEFAULT_RENDER_DIR) -> list[RenderedWav]:
     return sorted((_wav_info(path) for path in render_dir.glob("*.wav")), key=lambda item: item.label)
 
 
+def available_stimulus_wavs(design: StimulusDesign, render_dir: Path = DEFAULT_RENDER_DIR) -> list[RenderedWav]:
+    wavs: list[RenderedWav] = []
+    seen_paths: set[Path] = set()
+    for asset in design.custom_looming_files:
+        path = _resolve_asset_path(asset.path)
+        if not path.exists():
+            continue
+        resolved = path.resolve()
+        if resolved in seen_paths:
+            continue
+        wavs.append(_wav_info(path, label=asset.label))
+        seen_paths.add(resolved)
+    for wav in rendered_wavs(render_dir):
+        resolved = wav.path.resolve()
+        if resolved in seen_paths:
+            continue
+        wavs.append(wav)
+        seen_paths.add(resolved)
+    return sorted(wavs, key=lambda item: item.label)
+
+
 def preflight_run_package(
     design: StimulusDesign,
     participant_id: str,
@@ -151,7 +172,7 @@ def preflight_run_package(
     if not participant_ready:
         messages.append("Participant ID is required.")
 
-    wavs = rendered_wavs(render_dir)
+    wavs = available_stimulus_wavs(design, render_dir)
     render_ready = bool(wavs)
     if not render_ready:
         messages.append("Rendered looming WAVs are missing.")
@@ -192,7 +213,7 @@ def prepare_run_package(
     clean_participant = sanitize_participant_id(participant_id)
     if not clean_participant:
         raise ValueError("Participant ID is required.")
-    wavs = rendered_wavs(render_dir)
+    wavs = available_stimulus_wavs(design, render_dir)
     if not wavs:
         raise FileNotFoundError(f"No rendered WAV files found in {render_dir}.")
 
@@ -673,12 +694,19 @@ def _wav_lookup(wavs: list[RenderedWav]) -> dict[str, RenderedWav]:
     for wav in wavs:
         for key in {wav.label, wav.path.stem, wav.path.name, wav.path.stem.replace("looming_", "")}:
             if key:
-                lookup[key.strip().lower()] = wav
-                lookup[_slug(key).lower()] = wav
+                lookup.setdefault(key.strip().lower(), wav)
+                lookup.setdefault(_slug(key).lower(), wav)
     return lookup
 
 
-def _wav_info(path: Path, *, sha256: str = "") -> RenderedWav:
+def _resolve_asset_path(value: str | Path) -> Path:
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
+
+
+def _wav_info(path: Path, *, sha256: str = "", label: str = "") -> RenderedWav:
     try:
         import soundfile as sf
 
@@ -690,8 +718,8 @@ def _wav_info(path: Path, *, sha256: str = "") -> RenderedWav:
         duration_s = 0.0
         sample_rate = 0
         channels = 0
-    label = path.stem.replace("looming_", "").replace("_", " ")
-    return RenderedWav(path=path, label=label, duration_s=duration_s, sample_rate=sample_rate, channels=channels, sha256=sha256)
+    wav_label = label.strip() or path.stem.replace("looming_", "").replace("_", " ")
+    return RenderedWav(path=path, label=wav_label, duration_s=duration_s, sample_rate=sample_rate, channels=channels, sha256=sha256)
 
 
 def _write_session_manifest(package: RunPackage, wavs: list[RenderedWav]) -> None:
