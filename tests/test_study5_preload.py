@@ -35,8 +35,9 @@ def test_dashboard_starts_from_study5_when_no_deliberate_profile_is_saved(tmp_pa
 
     assert fresh["selected_template"] == DEFAULT_STUDY_TEMPLATE_ID
     assert fresh["design"]["prestimulus_files"][0]["label"] == "Inhale instruction"
-    assert fresh["design"]["custom_looming_files"][0]["label"] == "Pink frontal"
-    assert fresh["design"]["protocol"]["trial_strips"][0]["label"] == "Inhale event"
+    assert fresh["design"]["noises"][0]["label"] == "Pink frontal"
+    assert fresh["design"]["custom_looming_files"] == []
+    assert fresh["design"]["protocol"]["trial_strips"][0]["label"] == "Inhale trial type"
     assert fresh["preload_inventory"]["status"] == "ready"
     assert fresh["preflight"]["render_ready"] is True
 
@@ -88,10 +89,10 @@ def test_dashboard_migrates_legacy_study5_row_labels_on_saved_profile_load(tmp_p
     ).snapshot()
 
     assert [strip["label"] for strip in state["design"]["protocol"]["trial_strips"]] == [
-        "Inhale event",
-        "Exhale event",
+        "Inhale trial type",
+        "Exhale trial type",
     ]
-    assert "within-block event sequences" in state["design"]["study_profile_notes"]
+    assert "within-block trial type rows" in state["design"]["study_profile_notes"]
     assert "filmstrip trial rows" not in state["design"]["study_profile_notes"]
 
 
@@ -104,17 +105,24 @@ def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
     assert study5.verification_status == "verified"
     assert design.study_profile_title == "Study 5 PPS box-breathing profile"
     assert design.name == "Study 5 PPS box-breathing design"
-    assert [clip.label for clip in design.prestimulus_files] == ["Inhale instruction", "Exhale instruction"]
-    assert [clip.phase for clip in design.prestimulus_files] == ["Inhale", "Exhale"]
+    assert design.study_profile_reference_parameters["custom_clips_preloaded"] is True
+    custom_clip_assets = design.study_profile_reference_parameters["custom_clip_assets"]
+    assert [clip["label"] for clip in custom_clip_assets[:2]] == ["Inhale instruction", "Exhale instruction"]
+    assert [clip["variant"] for clip in custom_clip_assets[:2]] == ["british_kokoro", "british_kokoro"]
+    assert {clip["variant"] for clip in custom_clip_assets} == {"british_kokoro"}
+    assert all(clip["duration_s"] == pytest.approx(4.0) for clip in custom_clip_assets)
+    assert [clip.label for clip in design.prestimulus_files][:2] == ["Inhale instruction", "Exhale instruction"]
+    assert len(design.prestimulus_files) == 2
+    assert [clip.phase for clip in design.prestimulus_files[:2]] == ["Inhale", "Exhale"]
     assert all(clip.motion_mode == "stationary" for clip in design.prestimulus_files)
     assert all(clip.target_duration_s == pytest.approx(4.0) for clip in design.prestimulus_files)
-    assert design.noises == []
-    assert [asset.label for asset in design.custom_looming_files] == [
+    assert [asset.label for asset in design.noises] == [
         "Pink frontal",
         "Blue frontal",
         "White frontal",
         "Brown frontal",
     ]
+    assert design.custom_looming_files == []
 
     for clip in design.prestimulus_files:
         path = root / clip.path
@@ -124,10 +132,9 @@ def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
             assert wav.getnframes() == 176400
             assert wav.getnframes() / wav.getframerate() == pytest.approx(4.0)
 
-    for asset in design.custom_looming_files:
-        path = root / asset.path
+    for asset in design.noises:
+        path = root / asset.prebaked_path
         assert path.exists()
-        assert asset.render_mode == "preserve"
         assert asset.motion_mode == "looming"
         with wave.open(str(path), "rb") as wav:
             assert wav.getframerate() == 44100
@@ -142,18 +149,22 @@ def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
     assert all(asset["sha256_ok"] is True for asset in asset_status["assets"])
 
     strips = design.protocol.trial_strips
-    assert [strip.label for strip in strips] == ["Inhale event", "Exhale event"]
+    assert [strip.label for strip in strips] == ["Inhale trial type", "Exhale trial type"]
     assert [strip.elements[0].source_label for strip in strips] == ["Inhale instruction", "Exhale instruction"]
     for strip in strips:
+        assert strip.audio_tactile_percentage == pytest.approx(90.0)
+        assert strip.catch_percentage == pytest.approx(10.0)
+        assert strip.baseline_percentage == pytest.approx(0.0)
         assert strip.elements[0].kind == "fixed_audio"
         assert strip.elements[0].randomized is False
         assert strip.elements[1].kind == "looming_stimulus"
         assert strip.elements[1].randomized is True
-        assert strip.elements[1].source_labels == [asset.label for asset in design.custom_looming_files]
+        assert strip.elements[1].source_labels == [asset.label for asset in design.noises]
 
     assert validate_design(design) == []
     rows = block_trial_rows(design)
     noncatch = [row for row in rows if row["trial_type"] == "Audio-Tactile"]
-    assert len(noncatch) == design.protocol.blocks * 2 * len(design.custom_looming_files) * len(design.protocol.soa_values_ms)
-    assert {row["trial_strip_label"] for row in rows} == {"Inhale event", "Exhale event"}
+    assert len(noncatch) == design.protocol.blocks * 2 * len(design.noises) * len(design.protocol.soa_values_ms)
+    assert {row["trial_type_label"] for row in rows} == {"Inhale trial type", "Exhale trial type"}
+    assert {row["trial_strip_label"] for row in rows} == {"Inhale trial type", "Exhale trial type"}
     assert all("instruction | " in row["sequence_labels"] for row in rows)

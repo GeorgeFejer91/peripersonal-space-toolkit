@@ -129,8 +129,13 @@ def _noise_rows(design: StimulusDesign) -> list[dict[str, Any]]:
         row = {
             "label": source["label"],
             "noise_type": source["noise_type"],
+            "tone_type": source.get("tone_type", source["noise_type"]),
             "gain": source.get("gain", 1.0),
         }
+        if source.get("source_path"):
+            row["source_path"] = source.get("source_path", "")
+        if source.get("prebaked_path"):
+            row["prebaked_path"] = source.get("prebaked_path", "")
         if source["noise_type"] == CUSTOM_AUDIO_NOISE_TYPE:
             row.update(
                 {
@@ -156,6 +161,7 @@ def _stimulus_assembly_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 "label": noise.label,
                 "noise_type": noise.noise_type,
                 "gain": noise.gain,
+                "prebaked_path": noise.prebaked_path,
                 "sequence_order": noise.sequence_order or fallback_order,
                 "motion_mode": noise.motion_mode,
             }
@@ -170,6 +176,7 @@ def _stimulus_assembly_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 "label": asset.label,
                 "path": asset.path,
                 "target_duration_s": asset.target_duration_s,
+                "tone_type": asset.tone_type,
                 "gain": asset.gain,
                 "sequence_order": asset.sequence_order or fallback_order,
                 "motion_mode": asset.motion_mode,

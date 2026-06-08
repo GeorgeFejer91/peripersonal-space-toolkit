@@ -1,6 +1,6 @@
 ﻿# Peripersonal Space Toolkit
 
-A Windows-ready toolkit for running and reproducing the Study 5 audio-tactile peripersonal-space experiment. The repository packages the experiment runner, stimulus-generation pipeline, decoding helpers, small deidentified sample data, and Kokoro-generated spoken instruction assets.
+A Windows-ready toolkit for running and reproducing the Study 5 audio-tactile peripersonal-space experiment. The repository packages the experiment runner, stimulus-generation pipeline, decoding helpers, small deidentified sample data, and bundled spoken instruction asset variants.
 
 The default layout keeps source files public and keeps participant data local. Runtime recordings, demographics, generated stimuli, and model downloads are written to ignored folders.
 
@@ -77,7 +77,7 @@ compatibility path:
 windows\Launch_PPS_App.bat
 ```
 
-The designer can preload bundled published-study profiles from `study_templates\`; the current stress-test library contains 20 profiles that fill trajectory, timing, and noise fields while the standardized FABIAN HRIR renderer resource stays under the hood. See [docs/PARADIGM_LIBRARY.md](docs/PARADIGM_LIBRARY.md) and [docs/PUBLISHED_PARADIGM_STRESS_TEST.md](docs/PUBLISHED_PARADIGM_STRESS_TEST.md).
+The designer can preload bundled study profiles from `study_templates\`; the current catalog contains the unpublished Study 5 workflow plus 20 published-study profiles. Each profile has a matching local preload folder under `assets\preloads\<template_id>\` with segment metadata and prebaked auditory-only looming WAVs while the standardized FABIAN HRIR renderer resource stays under the hood. See [docs/PARADIGM_LIBRARY.md](docs/PARADIGM_LIBRARY.md) and [docs/PUBLISHED_PARADIGM_STRESS_TEST.md](docs/PUBLISHED_PARADIGM_STRESS_TEST.md).
 
 Optional: create a desktop shortcut for the launcher:
 
@@ -87,7 +87,7 @@ Optional: create a desktop shortcut for the launcher:
 
 ## Spoken Audio Assets
 
-The bundled spoken instruction WAV files are generated with Kokoro ONNX and are exactly 4.000 seconds long at 44.1 kHz. To regenerate them:
+The bundled spoken instruction WAV files include both the British Kokoro `bf_emma` voice set and the original Study 5 instruction audio decoded from local lab MP3 assets. The active root files and `assets\breathing\british_kokoro\` are exact 4.000-second British TTS WAVs. `assets\breathing\original_study5\` preserves the original Study 5 instruction messages as WAVs, with the inhale/exhale trial-window clips normalized to exactly 4.000 seconds for the Study 5 8-second trial unit. To regenerate the British set:
 
 ```bat
 windows\Regenerate_Spoken_Assets.bat
@@ -142,11 +142,12 @@ archives.
 ## Repository Layout
 
 ```text
-assets\breathing\        Kokoro-generated 4-second spoken WAVs
+assets\breathing\        Spoken instruction WAVs plus British/original variants
 assets\click\            Click/tactile cue seed asset
 assets\0. Head-Related...\FABIAN_HRIR_measured_HATO_0.sofa
                          Bundled standardized FABIAN/TU HRIR resource
 assets\master_blocks\    Study block templates
+assets\preloads\         Profile file-cabinet catalogs and prebaked looming WAVs
 configs\                 Example experiment and stimulus-design configs
 data\sample\             Deidentified sample analysis CSVs
 docs\                    Hardware setup, replication, privacy, Windows, protocol, and paradigm notes

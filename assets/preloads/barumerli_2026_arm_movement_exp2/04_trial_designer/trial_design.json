@@ -1,0 +1,23 @@
+{
+  "schema": "pps-preload-trial-designer-segment.v1",
+  "template_id": "barumerli_2026_arm_movement_exp2",
+  "repetitions_per_condition": 10,
+  "soa_values_ms": [
+    800,
+    1300,
+    2000,
+    2700,
+    3200
+  ],
+  "spatial_values_cm": [
+    90.0,
+    77.5,
+    60.0,
+    42.5,
+    30.0
+  ],
+  "custom_clip_assets": [],
+  "trial_strips": [],
+  "prestimulus_files": [],
+  "preview_trial_count": 310
+}

@@ -72,11 +72,11 @@ LOOMING_TEMPLATE_DECIMATE = 4
 LOOMING_CUE_SOA_MIN_S = 0.20
 LOOMING_CUE_SOA_MAX_S = 3.20
 
-# The breathing instruction TTS files are FIXED â€” exactly the same audio is
+# The breathing instruction TTS files are FIXED: exactly the same audio is
 # played every time the narrator says "Inhale / two / three / four / hold"
 # or the Exhale equivalent. Background music is overlaid on top in the
 # recording, but the TTS waveform itself is invariant. So we can do
-# deterministic template matching: cross-correlate the source MP3 against
+# deterministic template matching: cross-correlate the source WAV against
 # the recording audio channel to locate every instance precisely. This is
 # fully deterministic and much faster than any transcription-based approach.
 BREATHING_INSTRUCTION_ROOT = PROJECT_ROOT / "assets" / "breathing"
@@ -84,11 +84,9 @@ BREATHING_INSTRUCTION_FILES = {
     "Inhale": "Inhale-2-3-4-hold_FIXED.wav",
     "Exhale": "Exhale-2-3-4-hold_FIXED.wav",
 }
-# Both templates are 4.037 s; the "hold" word starts around 3.5 s into each.
-# Empirical burst analysis shows:
-#   Inhale template: 'hold' burst at [3.445, 3.673] s
-#   Exhale template: 'hold' burst at [3.550, 3.695] s
-# Use a shared offset that lands inside both.
+# Both templates are exact 4.000 s British Kokoro TTS assets. The "hold" word
+# starts near the end of each template; use a shared offset that lands inside
+# both hold portions.
 BREATHING_TEMPLATE_HOLD_OFFSET_S = 3.50
 
 # Minimum normalized correlation for a breathing template peak to count.

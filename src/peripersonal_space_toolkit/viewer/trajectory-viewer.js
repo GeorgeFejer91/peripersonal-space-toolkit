@@ -47,6 +47,9 @@ const TWO_D_ZOOM_BUTTON_FACTOR = 1.18;
 const START_MARKER_COLOR = 0x4ecb71;
 const END_MARKER_COLOR = 0xe0524d;
 const ENDPOINT_2D_LIFT_M = 0.07;
+const SOURCE_TRAJECTORY_2D_LIFT_M = 0.045;
+const SOURCE_TRAJECTORY_3D_LIFT_M = 0.018;
+const SOURCE_TRAJECTORY_OFFSET_M = 0.032;
 const pointer = new THREE.Vector2();
 const raycaster = new THREE.Raycaster();
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -397,6 +400,131 @@ function addArrowHead(start, end, material) {
   return cone;
 }
 
+function drawSourceTrajectoryInventory(payload, is2D, radius) {
+  const groups = groupedSourceTrajectories(payload.source_trajectories || []);
+  let sourceCount = 0;
+  let sharedGroupCount = 0;
+  for (const group of groups) {
+    sourceCount += group.sources.length;
+    if (group.colors.length > 1) sharedGroupCount += 1;
+    const start = appToThree(group.start, is2D);
+    const end = appToThree(group.end, is2D);
+    const lineCount = Math.max(1, group.colors.length);
+    group.colors.forEach((color, index) => {
+      const offset = sourceTrajectoryOffset(start, end, index, lineCount, is2D);
+      const lineStart = start.clone().add(offset);
+      const lineEnd = end.clone().add(offset);
+      const material = new THREE.MeshBasicMaterial({
+        color: safeSourceColor(color),
+        transparent: true,
+        opacity: is2D ? 0.92 : 0.78,
+        depthTest: !is2D,
+        depthWrite: false
+      });
+      const tube = addCylinderBetween(lineStart, lineEnd, Math.max(0.007, radius * 0.006), material);
+      if (tube) {
+        tube.renderOrder = is2D ? 45 : 20;
+        dynamicGroup.add(tube);
+      }
+      const arrow = addArrowHead(lineStart, lineEnd, material);
+      if (arrow) {
+        arrow.scale.setScalar(0.64);
+        arrow.renderOrder = is2D ? 46 : 21;
+        dynamicGroup.add(arrow);
+      }
+      addSourceTrajectoryDot(lineStart, color, radius, is2D);
+      addSourceTrajectoryDot(lineEnd, color, radius, is2D);
+    });
+  }
+  return { sourceCount, groupCount: groups.length, sharedGroupCount };
+}
+
+function groupedSourceTrajectories(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!validSourceTrajectory(row)) continue;
+    const key = sourceTrajectoryKey(row);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        start: row.start,
+        end: row.end,
+        sources: [],
+        colors: []
+      });
+    }
+    const group = groups.get(key);
+    group.sources.push(row);
+    const color = safeSourceColor(row.color_hex);
+    if (!group.colors.includes(color)) {
+      group.colors.push(color);
+    }
+  }
+  return [...groups.values()];
+}
+
+function validSourceTrajectory(row) {
+  return Boolean(row?.start && row?.end && numberLike(row.start.x_m) && numberLike(row.start.y_m) && numberLike(row.end.x_m) && numberLike(row.end.y_m));
+}
+
+function sourceTrajectoryKey(row) {
+  const parts = [];
+  for (const point of [row.start, row.end]) {
+    parts.push(
+      keyNumber(point.x_m),
+      keyNumber(point.y_m),
+      keyNumber(point.z_m)
+    );
+  }
+  const snapshot = row.trajectory_snapshot || {};
+  parts.push(
+    keyNumber(snapshot.movement_duration_s),
+    keyNumber(snapshot.start_hold_s),
+    keyNumber(snapshot.end_hold_s)
+  );
+  return parts.join("|");
+}
+
+function sourceTrajectoryOffset(start, end, index, count, is2D) {
+  const direction = new THREE.Vector3().subVectors(end, start);
+  let perpendicular = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), direction);
+  if (perpendicular.length() <= 0.0001) {
+    perpendicular = new THREE.Vector3(1, 0, 0);
+  }
+  const offsetAmount = (index - (count - 1) / 2) * SOURCE_TRAJECTORY_OFFSET_M;
+  const lift = is2D ? SOURCE_TRAJECTORY_2D_LIFT_M : SOURCE_TRAJECTORY_3D_LIFT_M;
+  return perpendicular.normalize().multiplyScalar(offsetAmount).add(new THREE.Vector3(0, lift, 0));
+}
+
+function addSourceTrajectoryDot(position, color, radius, is2D) {
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(Math.max(0.018, radius * 0.015), 18, 12),
+    new THREE.MeshBasicMaterial({
+      color: safeSourceColor(color),
+      transparent: true,
+      opacity: is2D ? 0.95 : 0.72,
+      depthTest: !is2D,
+      depthWrite: false
+    })
+  );
+  dot.position.copy(position);
+  dot.renderOrder = is2D ? 48 : 22;
+  dynamicGroup.add(dot);
+}
+
+function safeSourceColor(value) {
+  const text = String(value || "").trim();
+  return /^#[0-9A-Fa-f]{6}$/.test(text) ? text : "#f08b4f";
+}
+
+function numberLike(value) {
+  return Number.isFinite(Number(value));
+}
+
+function keyNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(4) : "";
+}
+
 function drawScene(payload) {
   dragHandles.clear();
   dynamicGroup.clear();
@@ -445,6 +573,7 @@ function drawScene(payload) {
 
   const start = appToThree(payload.start, is2D);
   const end = appToThree(payload.end, is2D);
+  const inventorySummary = drawSourceTrajectoryInventory(payload, is2D, radius);
   const pathMat = new THREE.MeshStandardMaterial({ color: 0xf08b4f, roughness: 0.45, metalness: 0.0 });
   const path = addCylinderBetween(start, end, Math.max(0.012, radius * 0.016), pathMat);
   if (path) dynamicGroup.add(path);
@@ -478,7 +607,8 @@ function drawScene(payload) {
   if (hudTitle) {
     hudTitle.textContent = is2D ? "2D Sound Path" : "3D Sound Path";
   }
-  statusEl.textContent = `${payload.path_length_m.toFixed(2)} m path, ${payload.movement_duration_s.toFixed(2)} s movement`;
+  const sourceStatus = inventorySummary.sourceCount ? `, ${inventorySummary.sourceCount} source trajector${inventorySummary.sourceCount === 1 ? "y" : "ies"}` : "";
+  statusEl.textContent = `${payload.path_length_m.toFixed(2)} m path, ${payload.movement_duration_s.toFixed(2)} s movement${sourceStatus}`;
   window.__trajectoryViewerState = {
     ready: true,
     view_mode: mode,
@@ -504,6 +634,9 @@ function drawScene(payload) {
     start_rotation_deg: payload.controls?.start_rotation_deg ?? "",
     end_rotation_deg: payload.controls?.end_rotation_deg ?? ""
   };
+  window.__trajectoryViewerState.source_trajectory_count = inventorySummary.sourceCount;
+  window.__trajectoryViewerState.source_trajectory_group_count = inventorySummary.groupCount;
+  window.__trajectoryViewerState.shared_tone_trajectory_group_count = inventorySummary.sharedGroupCount;
   container.dataset.viewerReady = "true";
   container.dataset.viewMode = mode;
   container.dataset.heightVisible = String(!is2D);
@@ -527,6 +660,9 @@ function drawScene(payload) {
   container.dataset.endDistanceCm = String(window.__trajectoryViewerState.end_distance_cm);
   container.dataset.startRotationDeg = String(window.__trajectoryViewerState.start_rotation_deg);
   container.dataset.endRotationDeg = String(window.__trajectoryViewerState.end_rotation_deg);
+  container.dataset.sourceTrajectoryCount = String(window.__trajectoryViewerState.source_trajectory_count);
+  container.dataset.sourceTrajectoryGroupCount = String(window.__trajectoryViewerState.source_trajectory_group_count);
+  container.dataset.sharedToneTrajectoryGroupCount = String(window.__trajectoryViewerState.shared_tone_trajectory_group_count);
 }
 
 function handlePointerDown(event) {

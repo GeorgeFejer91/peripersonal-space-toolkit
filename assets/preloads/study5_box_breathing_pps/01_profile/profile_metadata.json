@@ -1,0 +1,89 @@
+{
+  "schema": "pps-preload-profile-segment.v1",
+  "template_id": "study5_box_breathing_pps",
+  "title": "Study 5 PPS box-breathing profile",
+  "citation": "PPS Toolkit Study 5 protocol (2026). Box-breathing audio-tactile PPS profile. Unpublished lab profile.",
+  "doi": "",
+  "source_url": "docs/STUDY5_PROTOCOL.md",
+  "verification_status": "verified",
+  "notes": "Local unpublished Study 5 preload. This profile is not a published-study citation; it preloads the lab's box-breathing PPS workflow with bundled 4-second inhale/exhale instruction assets, Study 5 trajectory defaults, SOAs, catch trials, and within-block trial type rows.",
+  "reference_parameters": {
+    "profile_type": "local_unpublished_study5_box_breathing_pps",
+    "publication_status": "unpublished_lab_profile",
+    "instruction_assets_bundled": true,
+    "custom_clips_preloaded": true,
+    "instruction_duration_s": 4.0,
+    "default_instruction_asset_variant": "british_kokoro",
+    "inhale_instruction_asset": "assets/breathing/british_kokoro/Inhale-2-3-4-hold_FIXED.wav",
+    "exhale_instruction_asset": "assets/breathing/british_kokoro/Exhale-2-3-4-hold_FIXED.wav",
+    "instruction_asset_variants": {
+      "british_kokoro": {
+        "label": "British Kokoro voice",
+        "manifest": "assets/breathing/british_kokoro/spoken_assets_manifest.json",
+        "inhale_instruction_asset": "assets/breathing/british_kokoro/Inhale-2-3-4-hold_FIXED.wav",
+        "exhale_instruction_asset": "assets/breathing/british_kokoro/Exhale-2-3-4-hold_FIXED.wav"
+      },
+      "original_study5": {
+        "label": "Original Study 5 instruction audio",
+        "manifest": "assets/breathing/original_study5/spoken_assets_manifest.json",
+        "inhale_instruction_asset": "assets/breathing/original_study5/Inhale-2-3-4-hold_FIXED.wav",
+        "exhale_instruction_asset": "assets/breathing/original_study5/Exhale-2-3-4-hold_FIXED.wav"
+      }
+    },
+    "custom_clip_assets": [
+      {
+        "label": "Inhale instruction",
+        "phase": "Inhale",
+        "variant": "british_kokoro",
+        "path": "assets/breathing/british_kokoro/Inhale-2-3-4-hold_FIXED.wav",
+        "duration_s": 4.0,
+        "default": true
+      },
+      {
+        "label": "Exhale instruction",
+        "phase": "Exhale",
+        "variant": "british_kokoro",
+        "path": "assets/breathing/british_kokoro/Exhale-2-3-4-hold_FIXED.wav",
+        "duration_s": 4.0,
+        "default": true
+      }
+    ],
+    "trial_unit_duration_s": 8.0,
+    "looming_stimulus_window_s": 4.0,
+    "looming_assets_bundled": true,
+    "preload_inventory": "assets/preloads/preload_inventory.json",
+    "preload_asset_manifest": "assets/preloads/study5_box_breathing_pps/preload_manifest.json",
+    "preload_catalog_segments": [
+      "assets/preloads/study5_box_breathing_pps/01_profile",
+      "assets/preloads/study5_box_breathing_pps/02_looming_stimuli",
+      "assets/preloads/study5_box_breathing_pps/03_baseline_strategy",
+      "assets/preloads/study5_box_breathing_pps/04_trial_designer",
+      "assets/preloads/study5_box_breathing_pps/05_run_setup"
+    ],
+    "movement_duration_s": 3.0,
+    "movement_start_distance_cm": 110.0,
+    "movement_end_distance_cm": 10.0,
+    "start_hold_s": 0.5,
+    "end_hold_s": 0.5,
+    "tactile_pulse_duration_ms": 100,
+    "local_only_assets": true
+  },
+  "provenance": [
+    {
+      "field": "instruction assets",
+      "source": "Bundled owned Study 5 breathing instruction WAVs include both assets/breathing/british_kokoro generated with Kokoro ONNX using the British English bf_emma voice and assets/breathing/original_study5 decoded from the original local Study 5 instruction MP3s. The default preload uses the British Kokoro pair, while the original Study 5 inhale/exhale clips are exposed as alternate fixed-audio sources."
+    },
+    {
+      "field": "prebaked looming assets",
+      "source": "Bundled owned Study 5 auditory-only looming WAVs under assets/preloads/study5_box_breathing_pps/02_looming_stimuli; the preload inventory records the original generated-noise recipe, trajectory metadata, segment catalog paths, and SHA-256 hashes."
+    },
+    {
+      "field": "visible trial assembly",
+      "source": "Local Study 5 dashboard workflow uses within-block trial type rows: Inhale instruction | Looming Stimulus and Exhale instruction | Looming Stimulus. Rows are logged as trial_type_label values and scheduled sequentially top-to-bottom inside each block."
+    },
+    {
+      "field": "trajectory and SOAs",
+      "source": "Study 5 toolkit defaults: 110 cm to 10 cm approach, 3 s movement inside a 4 s stimulus window, SOAs 300/800/1500/2200/2700 ms."
+    }
+  ]
+}

@@ -2,7 +2,8 @@
 PPS Breathing Experiment Runner - With WASAPI Loopback Recording
 =================================================================
 - Sequential block playback (1-6) with manual override
-- Fixed audio routing: RIGHT channel â†’ Output 1 (Audio), LEFT channel â†’ Output 2 (Tactile)
+- Legacy Study 5 routing: WAV right -> Output 1 audio, WAV left -> Output 2 tactile
+- Rendered trajectory routing: Output 1/2 binaural audio, Output 3 tactile
 - Low-latency mouse click tone (tactile only)
 - Dedicated click area with 8-second recentering
 - Global pause/resume: Ctrl+Alt+P
@@ -11,10 +12,17 @@ PPS Breathing Experiment Runner - With WASAPI Loopback Recording
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+import os
+
+# Enable the ASIO-enabled PortAudio DLL from python-sounddevice when available.
+# This must be set before importing sounddevice. The Komplete Audio ASIO driver
+# exposes one clock-synchronized 6-output endpoint, while the Windows WDM/WASAPI
+# endpoints expose only separate stereo pairs.
+os.environ.setdefault("SD_ENABLE_ASIO", "1")
+
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
-import os
 import re
 import threading
 import time
@@ -22,6 +30,16 @@ import json
 import ctypes
 import argparse
 from pathlib import Path
+
+from .audio_routing import (
+    BINAURAL_TACTILE_CHANNELS,
+    apply_output_volumes,
+    center_audio_for_output,
+    prepare_block_audio_for_output,
+    preferred_runtime_output_channels,
+    tactile_output_channel_for_channels,
+    tactile_probe_for_output,
+)
 
 # Try to import pyaudiowpatch for WASAPI loopback recording
 try:
@@ -158,21 +176,21 @@ def build_arg_parser():
 # These settings prioritize timing stability over CPU usage
 
 # Buffer sizes (in samples) - larger = more stable, higher latency
-AUDIO_BLOCKSIZE = 2048      # Samples per callback (was 1024)
+AUDIO_BLOCKSIZE = 256       # Stable 3-channel ASIO callback size on Komplete Audio 6 MK2
 AUDIO_BUFFERSIZE = 4        # Number of buffers to queue
 
 # Latency settings for sounddevice streams
 # 'low' = minimum latency, 'high' = maximum stability
 # Numeric value = target latency in seconds (e.g., 0.1 = 100ms)
-STREAM_LATENCY = 0.05       # 50ms latency - good balance for experiments
+STREAM_LATENCY = 0.010      # 10ms request; Komplete ASIO measures ~16.5ms actual
 
 # For blocks (long playback) - prioritize stability
-BLOCK_STREAM_LATENCY = 0.1  # 100ms for stable block playback
-BLOCK_BLOCKSIZE = 4096      # Larger chunks for block playback
+BLOCK_STREAM_LATENCY = 0.010
+BLOCK_BLOCKSIZE = 256
 
 # For clicks (instant feedback) - prioritize low latency
-CLICK_LATENCY = 'low'       # Lowest possible for instant response
-CLICK_BLOCKSIZE = 256       # Small for responsive clicks
+CLICK_LATENCY = 0.010       # Lower 0.003/64 passed short tests but failed long persistent-stream tests
+CLICK_BLOCKSIZE = 256       # Small enough for response feedback; stable in long callback tests
 
 # Pre-buffer all audio to avoid I/O during playback
 PREBUFFER_AUDIO = True
@@ -192,8 +210,8 @@ def load_settings():
     """Load settings from file, return defaults if not found."""
     defaults = {
         "volume": 50,           # Background music volume
-        "audio_volume": 100,    # Audio output channel volume (Output 1)
-        "tactile_volume": 100   # Tactile output channel volume (Output 2)
+        "audio_volume": 100,    # Audio output volume (Output 1/2 for binaural)
+        "tactile_volume": 100   # Tactile output volume (Output 3 for spatial files)
     }
     try:
         if os.path.exists(SETTINGS_FILE):
@@ -253,11 +271,63 @@ def load_demographics(participant_id):
 # =============================================================================
 # AUDIO DEVICE DETECTION
 # =============================================================================
+def _hostapi_name_for_device(device_info):
+    try:
+        return sd.query_hostapis()[int(device_info["hostapi"])]["name"]
+    except Exception:
+        return ""
+
+
+def output_extra_settings_for_device(device_idx, channels):
+    """Return host-API-specific output settings for a stream, if needed."""
+    if device_idx is None:
+        return None
+    try:
+        device_info = sd.query_devices(device_idx)
+        if _hostapi_name_for_device(device_info).lower() == "asio" and hasattr(sd, "AsioSettings"):
+            return sd.AsioSettings(channel_selectors=list(range(int(channels))))
+    except Exception as exc:
+        print(f"Warning: Could not prepare host-specific audio settings: {exc}")
+    return None
+
+
 def find_output_device():
-    """Find 'Output 1/2 (Komplete Audio 6 MK2)' device, or fall back to system default."""
+    """Find the best output device.
+
+    Preference order:
+    1. Komplete Audio ASIO endpoint with >=3 outputs for binaural+tactile.
+    2. Any ASIO endpoint with >=3 outputs.
+    3. Any non-ASIO endpoint with >=3 outputs.
+    4. Legacy Komplete Output 1/2 stereo endpoint.
+    5. System default output device.
+    """
     devices = sd.query_devices()
 
-    # First try to find Komplete Audio 6
+    def output_candidates(min_channels):
+        rows = []
+        for i, dev in enumerate(devices):
+            if dev["max_output_channels"] >= min_channels:
+                rows.append((i, dev, _hostapi_name_for_device(dev)))
+        return rows
+
+    for i, dev, hostapi in output_candidates(BINAURAL_TACTILE_CHANNELS):
+        name = dev["name"].lower()
+        if "komplete" in name and hostapi.lower() == "asio":
+            return i, dev["name"], True
+
+    for i, dev, hostapi in output_candidates(BINAURAL_TACTILE_CHANNELS):
+        if hostapi.lower() == "asio":
+            return i, dev["name"], "komplete" in dev["name"].lower()
+
+    for i, dev, _hostapi in output_candidates(BINAURAL_TACTILE_CHANNELS):
+        name = dev["name"].lower()
+        if "komplete" in name:
+            return i, dev["name"], True
+
+    for i, dev, _hostapi in output_candidates(BINAURAL_TACTILE_CHANNELS):
+        return i, dev["name"], "komplete" in dev["name"].lower()
+
+    # Legacy Study 5 fallback: Komplete stereo pair.
     for i, dev in enumerate(devices):
         name = dev['name'].lower()
         if 'output 1/2' in name and 'komplete' in name and dev['max_output_channels'] >= 2:
@@ -278,6 +348,19 @@ def find_output_device():
 # =============================================================================
 # AUDIO ENGINE - OPTIMIZED FOR TIMING STABILITY
 # =============================================================================
+class _PersistentPlaybackHandle:
+    """Small stop/close handle for playback mixed into the persistent output stream."""
+
+    def __init__(self, stop_callback):
+        self._stop_callback = stop_callback
+
+    def stop(self):
+        self._stop_callback()
+
+    def close(self):
+        pass
+
+
 class AudioEngine:
     """Handles block playback and low-latency click feedback.
 
@@ -290,6 +373,11 @@ class AudioEngine:
 
     def __init__(self, device_idx):
         self.device_idx = device_idx
+        self.device_info = sd.query_devices(device_idx) if device_idx is not None else {}
+        self.device_hostapi = _hostapi_name_for_device(self.device_info) if self.device_info else ""
+        self.max_output_channels = int(self.device_info.get("max_output_channels", 0)) if self.device_info else 0
+        self.runtime_output_channels = preferred_runtime_output_channels(self.max_output_channels)
+        self.tactile_output_channel = tactile_output_channel_for_channels(self.runtime_output_channels)
         self.stop_flag = False
         self.paused = False
         self.pause_lock = threading.Lock()
@@ -297,8 +385,8 @@ class AudioEngine:
         self.pause_event.set()  # Not paused initially
 
         # Volume controls (0.0 to 1.0)
-        self.audio_volume = 1.0      # Output 1 (Audio channel)
-        self.tactile_volume = 1.0    # Output 2 (Tactile channel)
+        self.audio_volume = 1.0      # Output 1/2 for binaural; Output 1 for legacy
+        self.tactile_volume = 1.0    # Output 3 for binaural+tactile; Output 2 for legacy
 
         # Click sound state
         self._click_data = None
@@ -306,6 +394,8 @@ class AudioEngine:
         self._click_stream = None
         self._click_pos = 0
         self._click_active = False
+        self._click_metadata = {}
+        self._click_gain = None
         self._click_lock = threading.Lock()
 
         # Block playback state (callback-based)
@@ -316,6 +406,8 @@ class AudioEngine:
         self._block_lock = threading.Lock()
         self._block_finished = threading.Event()
         self._block_progress_callback = None
+        self._audio_event_callback = None
+        self._audio_sample_zero_emitted = False
 
         # Instruction playback state (callback-based)
         self._instr_data = None
@@ -344,11 +436,60 @@ class AudioEngine:
         self._recording_output_path = None  # Intended save path for current recording
         self._recording_start_time = None   # Time when recording started
 
-        print(f"AudioEngine initialized with latency settings: block={BLOCK_STREAM_LATENCY}s, click={CLICK_LATENCY}")
+        print(
+            "AudioEngine initialized: "
+            f"device=[{self.device_idx}] {self.device_info.get('name', 'default')} "
+            f"hostapi={self.device_hostapi or 'unknown'} max_out={self.max_output_channels} "
+            f"runtime_channels={self.runtime_output_channels} tactile_out={self.tactile_output_channel + 1} "
+            f"latency block={BLOCK_STREAM_LATENCY}s click={CLICK_LATENCY}"
+        )
 
         # Initialize WASAPI loopback device if available
         if PYAUDIOWPATCH_AVAILABLE and ENABLE_LOOPBACK_RECORDING:
             self._init_wasapi_loopback()
+
+    def _make_output_stream(self, *, samplerate, channels, latency, blocksize, callback):
+        """Create an output stream with host-specific channel selection when available."""
+        return sd.OutputStream(
+            samplerate=samplerate,
+            channels=channels,
+            dtype='float32',
+            device=self.device_idx,
+            latency=latency,
+            blocksize=blocksize,
+            extra_settings=output_extra_settings_for_device(self.device_idx, channels),
+            callback=callback,
+        )
+
+    def _persistent_output_available(self, *, samplerate, channels) -> bool:
+        return (
+            self._click_stream is not None
+            and self._click_stream.active
+            and int(samplerate) == int(self._click_sr)
+            and int(channels) == int(self.runtime_output_channels)
+        )
+
+    def _close_persistent_output(self):
+        if self._click_stream is not None:
+            try:
+                self._click_stream.stop()
+                self._click_stream.close()
+            except Exception:
+                pass
+            self._click_stream = None
+
+    def _restart_persistent_output(self):
+        if self._click_data is not None and self._click_stream is None:
+            self._init_click_stream()
+
+    def _promote_runtime_to_four_channels(self) -> bool:
+        """Use a silent fourth channel when a driver rejects 3-channel ASIO streams."""
+        if self.runtime_output_channels == 3 and self.max_output_channels >= 4:
+            self.runtime_output_channels = 4
+            self.tactile_output_channel = tactile_output_channel_for_channels(self.runtime_output_channels)
+            print("Audio routing: 3-channel stream failed; retrying with 4 channels (Output 4 silent).")
+            return True
+        return False
         
     def preload_audio(self, paths):
         """Pre-load audio files into cache for instant playback.
@@ -378,6 +519,12 @@ class AudioEngine:
         Hardcoded to always use Komplete Audio 6 MK2 Output 1/2 as the recording source,
         regardless of Windows default audio device settings.
         """
+        if self.device_hostapi.lower() == "asio":
+            print(
+                "NOTE: WASAPI loopback records the Windows Output 1/2 endpoint and may not capture "
+                "an ASIO multichannel stream. Use hardware loopback for full binaural+tactile QC."
+            )
+
         if not PYAUDIOWPATCH_AVAILABLE:
             print("WASAPI loopback not available (pyaudiowpatch not installed)")
             return False
@@ -576,15 +723,107 @@ class AudioEngine:
             print(f"ERROR: Failed to load click sound: {e}")
             return False
 
-    def _click_callback(self, outdata, frames, time_info, status):
-        """Low-latency callback - click goes to BOTH outputs for testing.
+    def _stream_time_value(self, time_info, name: str):
+        if time_info is None:
+            return None
+        if hasattr(time_info, name):
+            try:
+                return float(getattr(time_info, name))
+            except (TypeError, ValueError):
+                return None
+        try:
+            return float(time_info.get(name))
+        except Exception:
+            return None
 
-        Stream channel mapping:
-        - Channel 0 â†’ Output 1 (Audio)
-        - Channel 1 â†’ Output 2 (Tactile)
-        """
+    def _emit_audio_event(self, event_type, time_info=None, **payload):
+        callback = self._audio_event_callback
+        if callback is None:
+            return
+        payload.setdefault("event_type", event_type)
+        payload.setdefault("unix_time", time.time())
+        payload.setdefault("monotonic_time", time.perf_counter())
+        payload.setdefault("stream_output_buffer_dac_time", self._stream_time_value(time_info, "outputBufferDacTime"))
+        payload.setdefault("stream_current_time", self._stream_time_value(time_info, "currentTime"))
+        payload.setdefault("stream_input_buffer_adc_time", self._stream_time_value(time_info, "inputBufferAdcTime"))
+        try:
+            callback(payload)
+        except Exception as exc:
+            print(f"Audio event callback failed for {event_type}: {exc}")
+
+    def _emit_audio_sample_zero_once(self, time_info=None):
+        if self._audio_sample_zero_emitted:
+            return
+        self._audio_sample_zero_emitted = True
+        self._emit_audio_event(
+            "audio_sample_zero",
+            time_info,
+            sample_index=0,
+            sample_rate=self._block_sr,
+            output_channels=self.runtime_output_channels,
+            tactile_output_channel=self.tactile_output_channel,
+        )
+
+    def _click_callback(self, outdata, frames, time_info, status):
+        """Persistent output callback: background/instructions/blocks plus tactile click overlay."""
+        if status:
+            print(f"Click stream status: {status}")
         outdata.fill(0)
+
+        if hasattr(self, "bg_music_data") and not getattr(self, "bg_music_stop", True):
+            try:
+                remaining = len(self.bg_music_data) - self.bg_music_idx
+                if remaining >= frames:
+                    outdata[:] += self.bg_music_data[self.bg_music_idx:self.bg_music_idx + frames]
+                    self.bg_music_idx += frames
+                else:
+                    outdata[:remaining] += self.bg_music_data[self.bg_music_idx:]
+                    outdata[remaining:] += self.bg_music_data[:frames - remaining]
+                    self.bg_music_idx = frames - remaining
+            except Exception as exc:
+                print(f"Background mix error: {exc}")
+                self.bg_music_stop = True
+
+        if self._instr_data is not None and not self.stop_flag:
+            with self._instr_lock:
+                remaining = len(self._instr_data) - self._instr_pos
+                if remaining <= 0:
+                    self._instr_finished.set()
+                else:
+                    n = min(frames, remaining)
+                    outdata[:n] += apply_output_volumes(
+                        self._instr_data[self._instr_pos:self._instr_pos + n],
+                        self.audio_volume,
+                        0.0,
+                    )
+                    self._instr_pos += n
+                    if self._instr_pos >= len(self._instr_data):
+                        self._instr_finished.set()
+
+        if self._block_data is not None and not self.stop_flag:
+            if self.paused:
+                pass
+            else:
+                with self._block_lock:
+                    remaining = len(self._block_data) - self._block_pos
+                    if remaining <= 0:
+                        self._block_finished.set()
+                    else:
+                        n = min(frames, remaining)
+                        if n > 0 and self._block_pos == 0:
+                            self._emit_audio_sample_zero_once(time_info)
+                        outdata[:n] += apply_output_volumes(
+                            self._block_data[self._block_pos:self._block_pos + n],
+                            self.audio_volume,
+                            self.tactile_volume,
+                        )
+                        self._block_pos += n
+                        self.elapsed_time = self._block_pos / self._block_sr
+                        if self._block_pos >= len(self._block_data):
+                            self._block_finished.set()
+
         if not self._click_active or self._click_data is None:
+            np.clip(outdata, -1.0, 1.0, out=outdata)
             return
 
         with self._click_lock:
@@ -592,13 +831,26 @@ class AudioEngine:
             n = min(frames, remaining)
             if n > 0:
                 click_samples = self._click_data[self._click_pos:self._click_pos + n, 0]
-                # Output ONLY to Channel 1 (Tactile) - NOT audio
-                # Channel 0 (Audio) stays silent for clicks
-                outdata[:n, 1] = click_samples  # Output 2 (Tactile)
+                tactile_channel = min(tactile_output_channel_for_channels(outdata.shape[1]), outdata.shape[1] - 1)
+                if self._click_pos == 0:
+                    metadata = dict(self._click_metadata or {})
+                    self._emit_audio_event(
+                        "response_marker_start",
+                        time_info,
+                        sample_index=max(0, self._block_pos - frames),
+                        sample_rate=self._click_sr,
+                        marker_channel=tactile_channel,
+                        marker_gain=self._click_gain if self._click_gain is not None else self.tactile_volume,
+                        **metadata,
+                    )
+                outdata[:n, tactile_channel] = click_samples * (self._click_gain if self._click_gain is not None else self.tactile_volume)
                 self._click_pos += n
             if self._click_pos >= len(self._click_data):
                 self._click_active = False
                 self._click_pos = 0
+                self._click_metadata = {}
+                self._click_gain = None
+        np.clip(outdata, -1.0, 1.0, out=outdata)
 
     def _init_click_stream(self):
         """Initialize persistent low-latency click stream with optimized settings."""
@@ -607,14 +859,25 @@ class AudioEngine:
             return
         try:
             print(f"DEBUG: Initializing click stream on device {self.device_idx}, sr={self._click_sr}, latency={CLICK_LATENCY}")
-            self._click_stream = sd.OutputStream(
-                samplerate=self._click_sr,
-                channels=2,
-                device=self.device_idx,
-                latency=CLICK_LATENCY,
-                blocksize=CLICK_BLOCKSIZE,
-                callback=self._click_callback
-            )
+            try:
+                self._click_stream = self._make_output_stream(
+                    samplerate=self._click_sr,
+                    channels=self.runtime_output_channels,
+                    latency=CLICK_LATENCY,
+                    blocksize=CLICK_BLOCKSIZE,
+                    callback=self._click_callback
+                )
+            except Exception:
+                if self._promote_runtime_to_four_channels():
+                    self._click_stream = self._make_output_stream(
+                        samplerate=self._click_sr,
+                        channels=self.runtime_output_channels,
+                        latency=CLICK_LATENCY,
+                        blocksize=CLICK_BLOCKSIZE,
+                        callback=self._click_callback
+                    )
+                else:
+                    raise
             self._click_stream.start()
             print(f"DEBUG: Click stream started successfully, active={self._click_stream.active}")
         except Exception as e:
@@ -622,7 +885,7 @@ class AudioEngine:
             import traceback
             traceback.print_exc()
     
-    def trigger_click(self):
+    def trigger_click(self, metadata=None, marker_gain=None):
         """Trigger instant click playback."""
         if self._click_data is None:
             print("DEBUG: trigger_click - no click data")
@@ -640,6 +903,8 @@ class AudioEngine:
         with self._click_lock:
             self._click_pos = 0
             self._click_active = True
+            self._click_metadata = dict(metadata or {})
+            self._click_gain = marker_gain
             print("DEBUG: Click triggered!")
     
     def _block_callback(self, outdata, frames, time_info, status):
@@ -666,11 +931,14 @@ class AudioEngine:
                 return
 
             n = min(frames, remaining)
-            # Copy data and apply volume in real-time
-            outdata[:n] = self._block_data[self._block_pos:self._block_pos + n].copy()
-            # Apply volume to each channel (0 = Audio, 1 = Tactile)
-            outdata[:n, 0] *= self.audio_volume
-            outdata[:n, 1] *= self.tactile_volume
+            if n > 0 and self._block_pos == 0:
+                self._emit_audio_sample_zero_once(time_info)
+            # Apply volume in real time for instant slider response.
+            outdata[:n] = apply_output_volumes(
+                self._block_data[self._block_pos:self._block_pos + n],
+                self.audio_volume,
+                self.tactile_volume,
+            )
             if n < frames:
                 outdata[n:].fill(0)
 
@@ -681,18 +949,12 @@ class AudioEngine:
             if self._block_pos >= len(self._block_data):
                 self._block_finished.set()
 
-    def play_block(self, path, progress_callback=None) -> bool:
+    def play_block(self, path, progress_callback=None, audio_event_callback=None) -> bool:
         """Play a block WAV file with callback-based streaming for timing stability.
 
-        WAV file has:
-        - LEFT channel (index 0) = Tactile
-        - RIGHT channel (index 1) = Audio
-
-        Output mapping:
-        - Output 1 = Audio (from WAV RIGHT)
-        - Output 2 = Tactile (from WAV LEFT)
-
-        So we swap: stream[0] = wav[1], stream[1] = wav[0]
+        Supported layouts:
+        - legacy Study 5 stereo: WAV left=tactile, WAV right=audio; routed to Output 2/1.
+        - rendered spatial blocks: WAV channels left/right/tactile; routed to Output 1/2/3.
 
         Uses callback-based streaming for consistent timing (no jitter from write() loop).
         """
@@ -704,13 +966,22 @@ class AudioEngine:
             else:
                 data, sr = sf.read(path, dtype='float32')
 
-            if data.ndim != 2 or data.shape[1] != 2:
-                print(f"ERROR: Expected stereo file, got shape {data.shape}")
+            source_channels = 1 if data.ndim == 1 else int(data.shape[1])
+            if source_channels >= BINAURAL_TACTILE_CHANNELS and self.max_output_channels < BINAURAL_TACTILE_CHANNELS:
+                print(
+                    "ERROR: This rendered binaural+tactile block requires one synchronized "
+                    "3+ channel output device. Enable/select the Komplete ASIO driver or another "
+                    "multichannel output endpoint. Separate Windows stereo endpoints are not safe "
+                    "for binaural+tactile timing."
+                )
                 return False
 
-            # Swap channels: WAV[L,R] â†’ Output[R,L] so Output1=Audio, Output2=Tactile
-            # Volume is applied in real-time in the callback for instant slider response
-            data = np.ascontiguousarray(data[:, [1, 0]])
+            requested_channels = self.runtime_output_channels if source_channels >= BINAURAL_TACTILE_CHANNELS else 2
+            try:
+                prepared = prepare_block_audio_for_output(data, output_channels=requested_channels)
+            except ValueError as exc:
+                print(f"ERROR: Unsupported block WAV layout for {path}: {exc}")
+                return False
 
             # Setup state for callback
             self.stop_flag = False
@@ -719,24 +990,78 @@ class AudioEngine:
             self.elapsed_time = 0.0
             self._block_finished.clear()
             self._block_progress_callback = progress_callback
+            self._audio_event_callback = audio_event_callback
+            self._audio_sample_zero_emitted = False
 
             with self._block_lock:
-                self._block_data = data
+                self._block_data = prepared.data
                 self._block_sr = sr
                 self._block_pos = 0
 
-            # Create callback-based stream for consistent timing
-            self._block_stream = sd.OutputStream(
+            use_persistent_output = self._persistent_output_available(
                 samplerate=sr,
-                channels=2,
-                dtype='float32',
-                device=self.device_idx,
-                latency=BLOCK_STREAM_LATENCY,
-                blocksize=BLOCK_BLOCKSIZE,
-                callback=self._block_callback
+                channels=prepared.channels,
             )
 
-            print(f"Starting block playback: latency={BLOCK_STREAM_LATENCY}s, blocksize={BLOCK_BLOCKSIZE}")
+            if use_persistent_output:
+                print(
+                    "Starting block playback on persistent ASIO stream: "
+                    f"layout={prepared.layout}, source_channels={prepared.source_channels}, "
+                    f"output_channels={prepared.channels}, tactile_out={prepared.tactile_channel + 1}, "
+                    f"latency={STREAM_LATENCY}s, blocksize={AUDIO_BLOCKSIZE}"
+                )
+
+                def update_progress():
+                    while not self._block_finished.is_set() and not self.stop_flag:
+                        if progress_callback:
+                            progress_callback(self.elapsed_time)
+                        time.sleep(0.1)
+
+                progress_thread = threading.Thread(target=update_progress, daemon=True)
+                progress_thread.start()
+
+                while not self._block_finished.is_set() and not self.stop_flag:
+                    time.sleep(0.05)
+
+                with self._block_lock:
+                    self._block_data = None
+                self._audio_event_callback = None
+
+                return not self.stop_flag
+
+            self._close_persistent_output()
+
+            # Create callback-based stream for consistent timing
+            try:
+                self._block_stream = self._make_output_stream(
+                    samplerate=sr,
+                    channels=prepared.channels,
+                    latency=BLOCK_STREAM_LATENCY,
+                    blocksize=BLOCK_BLOCKSIZE,
+                    callback=self._block_callback,
+                )
+            except Exception:
+                if prepared.channels == 3 and self._promote_runtime_to_four_channels():
+                    prepared = prepare_block_audio_for_output(data, output_channels=4)
+                    with self._block_lock:
+                        self._block_data = prepared.data
+                        self._block_pos = 0
+                    self._block_stream = self._make_output_stream(
+                        samplerate=sr,
+                        channels=prepared.channels,
+                        latency=BLOCK_STREAM_LATENCY,
+                        blocksize=BLOCK_BLOCKSIZE,
+                        callback=self._block_callback,
+                    )
+                else:
+                    raise
+
+            print(
+                "Starting block playback: "
+                f"layout={prepared.layout}, source_channels={prepared.source_channels}, "
+                f"output_channels={prepared.channels}, tactile_out={prepared.tactile_channel + 1}, "
+                f"latency={BLOCK_STREAM_LATENCY}s, blocksize={BLOCK_BLOCKSIZE}"
+            )
             self._block_stream.start()
 
             # Progress update thread
@@ -761,12 +1086,16 @@ class AudioEngine:
             with self._block_lock:
                 self._block_data = None
 
+            self._restart_persistent_output()
+            self._audio_event_callback = None
             return not self.stop_flag
 
         except Exception as e:
             print(f"ERROR: Block playback failed: {e}")
             import traceback
             traceback.print_exc()
+            self._restart_persistent_output()
+            self._audio_event_callback = None
             return False
     
     def pause(self):
@@ -860,10 +1189,11 @@ class AudioEngine:
                 return
 
             n = min(frames, remaining)
-            # Copy data and apply volume in real-time
-            outdata[:n] = self._instr_data[self._instr_pos:self._instr_pos + n].copy()
-            # Apply audio volume to channel 0 (instructions only play on audio channel)
-            outdata[:n, 0] *= self.audio_volume
+            outdata[:n] = apply_output_volumes(
+                self._instr_data[self._instr_pos:self._instr_pos + n],
+                self.audio_volume,
+                0.0,
+            )
             if n < frames:
                 outdata[n:].fill(0)
 
@@ -873,7 +1203,7 @@ class AudioEngine:
                 self._instr_finished.set()
 
     def play_instruction(self, path, on_complete=None):
-        """Play instruction audio (MP3) through audio channel only (Output 1).
+        """Play instruction audio through auditory output channels only.
 
         Uses callback-based streaming for consistent timing.
         Returns immediately, calls on_complete when finished.
@@ -893,24 +1223,7 @@ class AudioEngine:
                 else:
                     data, sr = sf.read(path, dtype='float32')
 
-                # Handle mono or stereo - we only want audio channel (Output 1)
-                # Volume is applied in real-time in the callback for instant slider response
-                if data.ndim == 1:
-                    stereo_data = np.zeros((len(data), 2), dtype='float32')
-                    stereo_data[:, 0] = data
-                    data = stereo_data
-                elif data.ndim == 2 and data.shape[1] == 2:
-                    mono = (data[:, 0] + data[:, 1]) / 2
-                    stereo_data = np.zeros((len(mono), 2), dtype='float32')
-                    stereo_data[:, 0] = mono
-                    data = stereo_data
-                elif data.ndim == 2 and data.shape[1] == 1:
-                    stereo_data = np.zeros((len(data), 2), dtype='float32')
-                    stereo_data[:, 0] = data[:, 0]
-                    data = stereo_data
-
-                # Ensure C-contiguous
-                data = np.ascontiguousarray(data)
+                data = center_audio_for_output(data, self.runtime_output_channels)
 
                 self.stop_flag = False
                 self._instr_finished.clear()
@@ -921,16 +1234,47 @@ class AudioEngine:
                     self._instr_pos = 0
                     self._instr_on_complete = on_complete
 
+                if self._persistent_output_available(samplerate=sr, channels=data.shape[1]):
+                    print(
+                        "Starting instruction playback on persistent ASIO stream: "
+                        f"channels={data.shape[1]}, latency={STREAM_LATENCY}s, blocksize={AUDIO_BLOCKSIZE}"
+                    )
+                    while not self._instr_finished.is_set() and not self.stop_flag:
+                        time.sleep(0.05)
+
+                    with self._instr_lock:
+                        self._instr_data = None
+
+                    if on_complete:
+                        on_complete(not self.stop_flag)
+                    return
+
+                self._close_persistent_output()
+
                 # Create callback-based stream
-                self._instr_stream = sd.OutputStream(
-                    samplerate=sr,
-                    channels=2,
-                    dtype='float32',
-                    device=self.device_idx,
-                    latency=STREAM_LATENCY,
-                    blocksize=AUDIO_BLOCKSIZE,
-                    callback=self._instr_callback
-                )
+                try:
+                    self._instr_stream = self._make_output_stream(
+                        samplerate=sr,
+                        channels=data.shape[1],
+                        latency=STREAM_LATENCY,
+                        blocksize=AUDIO_BLOCKSIZE,
+                        callback=self._instr_callback,
+                    )
+                except Exception:
+                    if data.shape[1] == 3 and self._promote_runtime_to_four_channels():
+                        data = center_audio_for_output(data[:, :2], self.runtime_output_channels)
+                        with self._instr_lock:
+                            self._instr_data = data
+                            self._instr_pos = 0
+                        self._instr_stream = self._make_output_stream(
+                            samplerate=sr,
+                            channels=data.shape[1],
+                            latency=STREAM_LATENCY,
+                            blocksize=AUDIO_BLOCKSIZE,
+                            callback=self._instr_callback,
+                        )
+                    else:
+                        raise
                 self._instr_stream.start()
 
                 # Wait for playback to finish
@@ -944,6 +1288,8 @@ class AudioEngine:
                 with self._instr_lock:
                     self._instr_data = None
 
+                self._restart_persistent_output()
+
                 if on_complete:
                     on_complete(not self.stop_flag)
 
@@ -951,6 +1297,7 @@ class AudioEngine:
                 print(f"ERROR: Instruction playback failed: {e}")
                 import traceback
                 traceback.print_exc()
+                self._restart_persistent_output()
                 if on_complete:
                     on_complete(False)
 
@@ -959,7 +1306,7 @@ class AudioEngine:
     def start_background_music(self, path, volume=0.5):
         """Start playing background music in a continuous loop.
 
-        Plays through audio channel only (Output 1) at specified volume.
+        Plays through auditory output channels only at specified volume.
         Returns the stream object for control, or None on failure.
         """
         if not os.path.exists(path):
@@ -968,28 +1315,23 @@ class AudioEngine:
 
         try:
             data, sr = sf.read(path, dtype='float32')
-
-            # Convert mono to stereo if needed
-            if len(data.shape) == 1:
-                data = np.column_stack([data, np.zeros(len(data), dtype='float32')])
-            elif data.shape[1] >= 2:
-                # Take only first 2 channels, audio goes to channel 0 (Output 1)
-                data = data[:, :2].copy()
-                # Zero out channel 1 (Output 2 / tactile)
-                data[:, 1] = 0
-
-            # Apply volume
-            data[:, 0] *= volume
-
-            # Ensure C-contiguous
-            data = np.ascontiguousarray(data)
+            base_data = center_audio_for_output(data, self.runtime_output_channels)
+            data = apply_output_volumes(base_data, volume, 0.0)
 
             # Create looping playback
+            self.bg_music_base_data = base_data
             self.bg_music_data = data
             self.bg_music_sr = sr
             self.bg_music_idx = 0
             self.bg_music_volume = volume
             self.bg_music_stop = False
+
+            if self._persistent_output_available(samplerate=sr, channels=data.shape[1]):
+                print(
+                    f"Background music started on persistent ASIO stream "
+                    f"(channels={data.shape[1]}, volume: {volume*100:.0f}%)"
+                )
+                return _PersistentPlaybackHandle(lambda: setattr(self, "bg_music_stop", True))
 
             def callback(outdata, frames, time_info, status):
                 remaining = len(self.bg_music_data) - self.bg_music_idx
@@ -1002,17 +1344,36 @@ class AudioEngine:
                     outdata[remaining:] = self.bg_music_data[:frames - remaining]
                     self.bg_music_idx = frames - remaining
 
-            stream = sd.OutputStream(
-                device=self.device_idx,
-                samplerate=sr,
-                channels=2,
-                dtype='float32',
-                latency=STREAM_LATENCY,
-                blocksize=AUDIO_BLOCKSIZE,
-                callback=callback
-            )
+            self._close_persistent_output()
+
+            try:
+                stream = self._make_output_stream(
+                    samplerate=sr,
+                    channels=data.shape[1],
+                    latency=STREAM_LATENCY,
+                    blocksize=AUDIO_BLOCKSIZE,
+                    callback=callback,
+                )
+            except Exception:
+                if data.shape[1] == 3 and self._promote_runtime_to_four_channels():
+                    base_data = center_audio_for_output(base_data[:, :2], self.runtime_output_channels)
+                    data = apply_output_volumes(base_data, volume, 0.0)
+                    self.bg_music_base_data = base_data
+                    self.bg_music_data = data
+                    stream = self._make_output_stream(
+                        samplerate=sr,
+                        channels=data.shape[1],
+                        latency=STREAM_LATENCY,
+                        blocksize=AUDIO_BLOCKSIZE,
+                        callback=callback,
+                    )
+                else:
+                    raise
             stream.start()
-            print(f"Background music started (volume: {volume*100:.0f}%, latency={STREAM_LATENCY}s)")
+            print(
+                f"Background music started (channels={data.shape[1]}, "
+                f"volume: {volume*100:.0f}%, latency={STREAM_LATENCY}s)"
+            )
             return stream
 
         except Exception as e:
@@ -1021,10 +1382,8 @@ class AudioEngine:
 
     def set_background_volume(self, volume):
         """Update the volume of background music (0.0 to 1.0)."""
-        if hasattr(self, 'bg_music_data') and hasattr(self, 'bg_music_volume'):
-            # Rescale the data based on new volume
-            old_vol = self.bg_music_volume if self.bg_music_volume > 0 else 1.0
-            self.bg_music_data[:, 0] = (self.bg_music_data[:, 0] / old_vol) * volume
+        if hasattr(self, 'bg_music_base_data') and hasattr(self, 'bg_music_volume'):
+            self.bg_music_data = apply_output_volumes(self.bg_music_base_data, volume, 0.0)
             self.bg_music_volume = volume
 
     def set_main_volume(self, volume):
@@ -1119,7 +1478,15 @@ class PPSExperimentApp:
         else:
             print(f"Using system default audio: [{self.device_idx}] {self.device_name}")
         
-        self.audio = AudioEngine(self.device_idx) if self.device_idx else None
+        self.audio = AudioEngine(self.device_idx) if self.device_idx is not None else None
+        if self.audio:
+            if self.audio.max_output_channels >= BINAURAL_TACTILE_CHANNELS:
+                print(
+                    "Audio routing mode: spatial rendered files use Output 1/2 for binaural audio "
+                    f"and Output {self.audio.tactile_output_channel + 1} for tactile."
+                )
+            else:
+                print("Audio routing mode: legacy stereo only; rendered binaural+tactile files require ASIO 3+ outputs.")
         
         # Load click sound
         if self.audio:
@@ -1311,11 +1678,12 @@ class PPSExperimentApp:
         vol_frame = ttk.LabelFrame(left_panel, text="Output Volume", padding=8)
         vol_frame.pack(fill='x', pady=3)
 
-        # Audio channel volume (Output 1)
+        # Audio channel volume
         audio_row = ttk.Frame(vol_frame)
         audio_row.pack(fill='x', pady=2)
 
-        ttk.Label(audio_row, text="Audio (Out 1):", width=12).pack(side='left')
+        audio_label = "Audio L/R:" if self.audio and self.audio.runtime_output_channels >= 3 else "Audio (Out 1):"
+        ttk.Label(audio_row, text=audio_label, width=14).pack(side='left')
         saved_audio_vol = self.settings.get("audio_volume", 100)
         self.audio_volume_var = tk.DoubleVar(value=saved_audio_vol)
         self.audio_volume_scale = ttk.Scale(
@@ -1326,11 +1694,12 @@ class PPSExperimentApp:
         self.audio_volume_label = ttk.Label(audio_row, text=f"{int(saved_audio_vol)}%", width=4)
         self.audio_volume_label.pack(side='left')
 
-        # Tactile channel volume (Output 2)
+        # Tactile channel volume
         tactile_row = ttk.Frame(vol_frame)
         tactile_row.pack(fill='x', pady=2)
 
-        ttk.Label(tactile_row, text="Tactile (Out 2):", width=12).pack(side='left')
+        tactile_out = self.audio.tactile_output_channel + 1 if self.audio else 2
+        ttk.Label(tactile_row, text=f"Tactile (Out {tactile_out}):", width=14).pack(side='left')
         saved_tactile_vol = self.settings.get("tactile_volume", 100)
         self.tactile_volume_var = tk.DoubleVar(value=saved_tactile_vol)
         self.tactile_volume_scale = ttk.Scale(
@@ -1716,7 +2085,7 @@ class PPSExperimentApp:
         save_settings(self.settings)
 
     def _test_tactile_stimulus(self):
-        """Play the tactile test stimulus (SOA 0ms) on Output 2 only."""
+        """Play the tactile test stimulus on the active tactile output only."""
         if not os.path.exists(TACTILE_TEST_STIMULUS):
             messagebox.showerror("Error", f"Tactile test file not found:\n{TACTILE_TEST_STIMULUS}")
             return
@@ -1724,20 +2093,61 @@ class PPSExperimentApp:
         def play_tactile():
             try:
                 data, sr = sf.read(TACTILE_TEST_STIMULUS, dtype='float32')
-                # Ensure stereo
-                if data.ndim == 1:
-                    data = np.column_stack([data, np.zeros_like(data)])
-                elif data.shape[1] == 1:
-                    data = np.column_stack([data, np.zeros_like(data)])
+                output_channels = self.audio.runtime_output_channels if self.audio else 2
+                probe = tactile_probe_for_output(data, output_channels, 1.0)
+                device_idx = self.audio.device_idx if self.audio else None
 
-                # Create output: Channel 0 = silence, Channel 1 = tactile
-                stereo = np.zeros((len(data), 2), dtype='float32')
-                stereo[:, 1] = data[:, 0] * self.audio.tactile_volume if self.audio else data[:, 0]
+                if self.audio and self.audio._persistent_output_available(samplerate=sr, channels=probe.shape[1]):
+                    self.audio.stop_flag = False
+                    self.audio.paused = False
+                    self.audio._block_finished.clear()
+                    with self.audio._block_lock:
+                        self.audio._block_data = probe
+                        self.audio._block_sr = sr
+                        self.audio._block_pos = 0
+                    while not self.audio._block_finished.is_set() and not self.audio.stop_flag:
+                        time.sleep(0.01)
+                    with self.audio._block_lock:
+                        self.audio._block_data = None
+                    print(f"DEBUG: Playing tactile test stimulus on Output {tactile_output_channel_for_channels(probe.shape[1]) + 1}")
+                    return
 
-                sd.play(stereo, sr, device=self.audio.device_idx if self.audio else None)
-                print("DEBUG: Playing tactile test stimulus (SOA 0ms)")
+                if self.audio:
+                    self.audio._close_persistent_output()
+
+                try:
+                    stream = sd.OutputStream(
+                        samplerate=sr,
+                        channels=probe.shape[1],
+                        dtype='float32',
+                        device=device_idx,
+                        latency=STREAM_LATENCY,
+                        blocksize=AUDIO_BLOCKSIZE,
+                        extra_settings=output_extra_settings_for_device(device_idx, probe.shape[1]),
+                    )
+                except Exception:
+                    if self.audio and probe.shape[1] == 3 and self.audio._promote_runtime_to_four_channels():
+                        probe = tactile_probe_for_output(data, self.audio.runtime_output_channels, tactile_volume)
+                        stream = sd.OutputStream(
+                            samplerate=sr,
+                            channels=probe.shape[1],
+                            dtype='float32',
+                            device=device_idx,
+                            latency=STREAM_LATENCY,
+                            blocksize=AUDIO_BLOCKSIZE,
+                            extra_settings=output_extra_settings_for_device(device_idx, probe.shape[1]),
+                        )
+                    else:
+                        raise
+
+                with stream:
+                    stream.write(apply_output_volumes(probe, 1.0, self.audio.tactile_volume if self.audio else 1.0))
+                print(f"DEBUG: Playing tactile test stimulus on Output {tactile_output_channel_for_channels(probe.shape[1]) + 1}")
             except Exception as e:
                 print(f"ERROR: Could not play tactile test: {e}")
+            finally:
+                if self.audio:
+                    self.audio._restart_persistent_output()
 
         # Play in background thread to not block UI
         threading.Thread(target=play_tactile, daemon=True).start()
@@ -2451,7 +2861,21 @@ def main(argv=None):
             out_ch = dev['max_output_channels']
             in_ch = dev['max_input_channels']
             if out_ch > 0 or in_ch > 0:
-                print(f"[{i}] {dev['name']} (out:{out_ch}, in:{in_ch})")
+                hostapi = _hostapi_name_for_device(dev)
+                flags = []
+                if out_ch >= BINAURAL_TACTILE_CHANNELS:
+                    flags.append("spatial-ok")
+                elif out_ch >= 2:
+                    flags.append("legacy-only")
+                if hostapi.lower() == "asio":
+                    flags.append("asio")
+                flag_text = f" [{' '.join(flags)}]" if flags else ""
+                sr = dev.get("default_samplerate", "")
+                low = dev.get("default_low_output_latency", "")
+                print(
+                    f"[{i}] {dev['name']} | {hostapi} | out:{out_ch}, in:{in_ch}, "
+                    f"sr:{sr}, low_out:{low}{flag_text}"
+                )
         return 0
     
     root = tk.Tk()

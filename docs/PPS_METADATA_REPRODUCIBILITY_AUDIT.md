@@ -4,6 +4,8 @@ Status: GUI-focused metadata checklist for recreating published audio-tactile pe
 
 Non-GUI details such as participant demographics, ethics text, complete clinical history, full VR scene aesthetics, and general theory are intentionally excluded unless they change an audio-tactile stimulus, trial schedule, event marker, or analysis setting.
 
+For the current per-study stress test of bundled profiles, including trial-family types, SOA semantics, jitter/procedure gaps, and a compact implementation strategy, see [PUBLISHED_PARADIGM_STRESS_TEST.md](PUBLISHED_PARADIGM_STRESS_TEST.md).
+
 ## Scope
 
 The target is a reusable GUI for audio-tactile PPS experiments: speaker-based, headphone/HRTF, SOFA/HRIR, imported looming audio, generated noise trajectories, tactile go/no-go events, block randomization, response capture, XDF events, and immediate PPS curve fitting.
@@ -11,7 +13,7 @@ The target is a reusable GUI for audio-tactile PPS experiments: speaker-based, h
 A field belongs in this checklist only if it can become one of these app surfaces:
 
 - Stimulus Design tab
-- Trial Design tab
+- Trial Assembler tab
 - Runner/Event Capture tab
 - Analysis tab
 - Template metadata/provenance panel
@@ -27,28 +29,30 @@ Holmes et al. (2020) remains the systematic anchor for this audit because it rev
 |---|---:|---|
 | design name | implemented | Saved/preloaded experiment identity. |
 | study template preload | implemented | Lets users load published paradigms as starting points. |
-| SOFA/HRIR file path | implemented | Enables reproducible spatial audio rendering. |
+| SOFA/HRIR file path | model-only | Fixed FABIAN/TU path is stored for generation/export, but not exposed as an experimenter control. |
 | noise label | implemented | Names condition-level auditory stimuli. |
 | noise type | implemented | Supports pink, blue, violet, white, and brown noise variants. |
 | auditory azimuth | implemented | Required for front/rear/left/right and lateral PPS designs. |
 | auditory elevation | implemented | Required for 3D PPS designs such as Lerner et al. |
 | auditory gain | implemented | Encodes relative intensity between sound conditions. |
-| snap noise locations to SOFA grid | implemented | Prevents impossible or unsupported HRIR coordinates. |
+| snap noise locations to SOFA grid | model-only | HRIR alignment belongs in generation/validation, not in the routine experimenter UI. |
 | custom looming audio file | implemented | Lets users import local dry tones for trajectory spatialization or preserve published/control looming stimuli as already-baked audio. |
 | custom prestimulus audio file | implemented | Lets users preload instruction, pre-cue, or baseline/prestimulus files. |
 | target imported audio duration | implemented | Useful for enforcing fixed 4 s imported chunks. |
-| trajectory start radius | implemented | Defines far/initial sound distance. |
-| trajectory end radius | implemented | Defines near/final sound distance. |
-| trajectory direction | implemented | Supports approach, recede, lateral, and custom paths. |
-| path length | implemented | Defines physical/virtual distance traveled by the auditory stimulus. |
-| propagation speed | implemented | Needed for Canzoneri/Noel/Tonelli/Lerner-style looming timing. |
-| start/end azimuth | implemented | Supports changing horizontal direction along the path. |
-| elevation | implemented | Supports 3D trajectory height. |
+| trajectory starting point distance | implemented | Defines the initial sound-source distance from the listener in cm. |
+| trajectory starting point rotation | implemented | Defines the initial sound-source angle around the listener with full 0-360 degree input. |
+| trajectory end point distance | implemented | Defines the final sound-source distance from the listener in cm. |
+| trajectory end point rotation | implemented | Defines the final sound-source angle around the listener with full 0-360 degree input. |
+| trajectory start/end X/Y/Z | model-only | Derived from distance/rotation controls and kept in saved design/export data. |
+| trajectory direction | model-only | Stored for compatibility; the current GUI preview uses the explicit start/end points and a linear path. |
+| path length | implemented | Derived from the explicit start/end points and defines physical/virtual distance traveled by the auditory stimulus. |
+| propagation speed | implemented | Derived from path length and movement duration for Canzoneri/Noel/Tonelli/Lerner-style looming timing. |
+| trajectory elevation | model-only | The current GUI keeps endpoint movement horizontal because the visible controls must match the supported SOFA generation path. |
 | lead/tail padding | implemented | Controls silence/prestimulus and poststimulus audio padding. |
 | sample rate | model-only | Stored in the model, but not yet exposed as a GUI control. |
 | inverse-square gain law | model-only | Stored in the model, but not yet exposed as a GUI control. |
 
-### Trial Design Tab
+### Trial Assembler Tab
 
 | GUI field | Current status | Why it matters for PPS replication |
 |---|---:|---|
@@ -100,7 +104,7 @@ Add controls for constant intensity, linear rising intensity, inverse-square, tw
 
 3. Spatial rendering mode
 
-Add a dropdown for physical speakers, stereo crossfade, SOFA/HRIR binaural, HMD/ambisonic, imported baked audio, and intensity-only looming. The current SOFA field is useful, but the app should know how the sound is supposed to be rendered.
+If the app later supports multiple rendering setups, add an internal protocol/rendering profile for physical speakers, stereo crossfade, SOFA/HRIR binaural, HMD/ambisonic, imported baked audio, and intensity-only looming. For the current workflow, the FABIAN/TU SOFA HRIR source remains fixed under the hood.
 
 4. Tactile stimulus specification
 

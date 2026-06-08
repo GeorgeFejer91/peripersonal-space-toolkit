@@ -57,6 +57,13 @@ stimulus files or experiment outputs online. Audio selected in the dashboard is
 imported by the local companion backend and stored in ignored local data before
 being used by the render/session pipeline.
 
+Preload profiles use a local file-cabinet catalog under `assets\preloads\<template_id>\`.
+The folder names mirror the HTML dashboard stages: `01_profile`,
+`02_looming_stimuli`, `03_baseline_strategy`, `04_trial_designer`, and
+`05_run_setup`. The looming segment stores prebaked auditory-only WAVs plus
+source/tone/trajectory metadata; tactile cues are still introduced during
+session preparation from the saved trial/SOA schedule.
+
 ## Design Controls
 
 The designer has three workflow tabs:
@@ -184,7 +191,7 @@ locomotor, VR, speaker-array, or proprietary-sound manipulations. The FABIAN
 neutral HRIR remains the standardized under-the-hood renderer resource for
 everyone.
 
-The profile selector displays paper-like labels, for example author/year plus the article title where the template citation can be parsed. In the HTML dashboard, choosing a published preload or `Custom design (define manually)` from the selector loads that profile immediately without a separate load button. Use the `Citation` button in the Qt comparison UI to inspect or export the selected profile citation. Exported BibTeX and CSL JSON are generated from each template's stored `citation`, `doi`, `source_url`, verification status, and template id.
+The profile selector displays paper-like labels, for example author/year plus the article title where the template citation can be parsed. In the HTML dashboard, choosing a published preload or `Custom design (define manually)` from the selector loads that profile immediately without a separate load button. Published profiles show a DOI URL plus a separate caveat that the dashboard recreates reported study parameters locally rather than using the exact original stimulus set from the paper. Use the `Citation` button in the Qt comparison UI to inspect or export the selected profile citation. Exported BibTeX and CSL JSON are generated from each template's stored `citation`, `doi`, `source_url`, verification status, and template id.
 
 ## Visual QA
 

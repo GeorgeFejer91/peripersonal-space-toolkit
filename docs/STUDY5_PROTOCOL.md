@@ -19,17 +19,17 @@ This toolkit packages the audio-tactile peripersonal-space task used for Study 5
 
 ## Respiratory Phases
 
-The public assets include separate 4-second inhale and exhale instruction WAVs. The generator combines these instructions with stimulus segments to create 8-second trials.
+The public assets include both British Kokoro `bf_emma` instruction WAVs and the original Study 5 instruction audio decoded from local lab MP3 assets. The default preload uses the British 4-second inhale/exhale pair, and the original Study 5 inhale/exhale pair is exposed as alternate fixed audio for the Trial Designer. The generator combines whichever 4-second inhale/exhale instruction pair is selected with stimulus segments to create 8-second trials.
 
 ## Prebaked Looming Assets
 
-Study 5 also includes owned 4-second auditory-only looming WAVs for the pink, blue, white, and brown frontal sources under `assets/preloads/study5_box_breathing_pps/`. These files are binaural/source stimuli only; tactile events are still introduced later from the SOA schedule during session preparation.
+Study 5 also includes owned 4-second auditory-only looming WAVs for the pink, blue, white, and brown frontal sources under `assets/preloads/study5_box_breathing_pps/02_looming_stimuli/`. These files are binaural/source stimuli only; tactile events are still introduced later from the SOA schedule during session preparation.
 
-The preload asset inventory lives at `assets/preloads/preload_inventory.json`, with a Study 5 profile manifest at `assets/preloads/study5_box_breathing_pps/preload_manifest.json`. The dashboard/backend use this inventory to verify the local assets and to distinguish bundled Study 5 assets from other preload profiles that are currently recipe-only and should be baked by the local companion before use.
+The preload asset inventory lives at `assets/preloads/preload_inventory.json`, with a Study 5 profile manifest at `assets/preloads/study5_box_breathing_pps/preload_manifest.json`. Each preload profile uses the same local file-cabinet structure as the HTML dashboard: `01_profile`, `02_looming_stimuli`, `03_baseline_strategy`, `04_trial_designer`, and `05_run_setup`. The dashboard/backend use this inventory to verify local assets and read source, trajectory, baseline, trial, and run-default metadata.
 
 ## Dashboard Preload
 
-The HTML dashboard profile `study5_box_breathing_pps` is the unpublished local Study 5 preload. It is separate from published-study profiles such as Canzoneri et al. (2012) and preloads the bundled 4-second inhale/exhale instruction WAVs, bundled 4-second auditory-only looming source WAVs, and the default `Inhale instruction | Looming Stimulus` and `Exhale instruction | Looming Stimulus` within-block event sequences.
+The HTML dashboard profile `study5_box_breathing_pps` is the unpublished local Study 5 preload. It is separate from published-study profiles such as Canzoneri et al. (2012) and preloads both instruction variants, bundled 4-second auditory-only looming source WAVs, and the default `Inhale instruction | Looming Stimulus` and `Exhale instruction | Looming Stimulus` within-block trial type rows. The rows are logged as `trial_type_label` values and scheduled sequentially top-to-bottom, so Study 5 plays the inhale trial type followed by the exhale trial type. Instruction snippet loading and selection belong in the Trial Designer segment, not in the Looming Stimuli Builder.
 
 This profile is the default dashboard startup profile. Fresh launches and scratch-custom startup states initialize from Study 5 so the current lab workflow is ready without selecting a profile manually.
 

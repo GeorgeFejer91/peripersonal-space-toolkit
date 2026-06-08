@@ -49,6 +49,7 @@ def preload_inventory_payload(template_ids: list[str], *, repo_root: Path = REPO
         "schema": inventory.get("schema", INVENTORY_SCHEMA),
         "inventory_path": str(INVENTORY_RELATIVE_PATH.as_posix()),
         "base_url": inventory.get("base_url", ""),
+        "segments": list(inventory.get("segments", [])),
         "default_policy": inventory.get("default_policy", {}),
         "profiles": [
             profile_asset_status(template_id, inventory=inventory, repo_root=repo_root)
@@ -91,6 +92,7 @@ def profile_asset_status(
         "asset_count": len(assets),
         "ready_asset_count": sum(1 for asset in assets if asset["exists"] and asset.get("sha256_ok") is not False),
         "assets": assets,
+        "catalog_segments": list(entry.get("catalog_segments", [])),
         "message": _status_message(status, entry, assets),
     }
 
@@ -156,6 +158,11 @@ def _asset_status(asset: dict[str, Any], *, inventory: dict[str, Any], repo_root
         "channels": asset.get("channels"),
         "source_kind": asset.get("source_kind", ""),
         "noise_type": asset.get("noise_type", ""),
+        "tone_type": asset.get("tone_type", asset.get("noise_type", "")),
+        "motion_mode": asset.get("motion_mode", ""),
+        "render_mode": asset.get("render_mode", ""),
+        "include_tactile": asset.get("include_tactile"),
+        "trajectory_snapshot": asset.get("trajectory_snapshot", {}),
     }
 
 
@@ -172,6 +179,7 @@ def _default_status(template_id: str, inventory: dict[str, Any]) -> dict[str, An
         "asset_count": 0,
         "ready_asset_count": 0,
         "assets": [],
+        "catalog_segments": [],
         "message": "No preload asset entry exists yet; use the local companion to bake this profile on demand.",
     }
 
