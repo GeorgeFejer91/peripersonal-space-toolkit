@@ -607,6 +607,8 @@ def _write_block_manifest(path: Path, rows: list[dict[str, Any]], participant_id
         "Sequence_Labels",
         "Fixed_Audio_Labels",
         "Fixed_Audio_Paths",
+        "Baseline_Strategy",
+        "Baseline_Sample_Index",
         "Trial_Unit_Key",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -637,6 +639,8 @@ def _write_block_manifest(path: Path, rows: list[dict[str, Any]], participant_id
                     "Sequence_Labels": row.get("sequence_labels", ""),
                     "Fixed_Audio_Labels": row.get("fixed_audio_labels", ""),
                     "Fixed_Audio_Paths": row.get("fixed_audio_paths", ""),
+                    "Baseline_Strategy": row.get("baseline_strategy", ""),
+                    "Baseline_Sample_Index": row.get("baseline_sample_index", ""),
                     "Trial_Unit_Key": row.get("trial_unit_key", ""),
                 }
             )

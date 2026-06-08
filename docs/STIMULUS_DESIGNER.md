@@ -39,6 +39,14 @@ sizing happens directly in the workspace through draggable snapping splitters
 and panel-edge handles, so researchers can resize the working panels without
 using abstract slider controls.
 
+The one-page workflow uses sequential decision segments: profile selection,
+looming-stimulus building, trial design, baseline strategy, run setup, and
+review. The baseline segment is separate because baseline tactics depend on the
+current event rows, selected stimuli, SOAs, repetitions, blocks, and catch
+percentage. It lets researchers choose no baseline, tactile-only timing anchors,
+SOA 0, sound-offset/end anchors, or custom baseline timings, then shows live
+baseline-count and experiment-duration estimates before session preparation.
+
 The dashboard can also be served as a GitHub Pages site. In that mode, start
 `windows\Start_Website_Companion.bat` on the research PC and use the left-rail
 companion controls to connect the hosted page to the local backend. See
@@ -76,6 +84,7 @@ The designer currently covers:
 - default horizontal trajectory placement on the listener head/ear plane; height controls are hidden in `2D bird's-eye` mode and only become editable after switching to `3D orbit`
 - linear trajectory geometry with derived path length/speed, movement duration, Start hold, and End hold
 - protocol schedule controls for repetitions per condition, SOA values, spatial values, catch-trial percentage, respiratory phases, blocks, participants, and random seed
+- an HTML-dashboard baseline strategy segment for baseline tactic, baseline timing anchors, baseline proportion, live trial-count feedback, and duration estimates
 - compact OpenSesame-style trial assembly controls that define condition factors, trial families, and which stimulus types are allowed in each block: audio-tactile, baseline, and catch
 - live trial-table and participant block-order previews before protocol CSV export
 - runner controls that prepare a participant run package from the current design, stress-test the preferred audio route, open Focus Mode, write event CSV/XDF outputs, and produce immediate response/QC CSVs

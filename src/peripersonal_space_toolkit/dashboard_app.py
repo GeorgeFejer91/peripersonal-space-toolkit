@@ -26,6 +26,7 @@ from .design import (
     AudioFileSpec,
     BlockSpec,
     NoiseDefinition,
+    SUPPORTED_BASELINE_STRATEGIES,
     SUPPORTED_NOISE_TYPES,
     StimulusDesign,
     azimuth_to_display_rotation_deg,
@@ -249,6 +250,8 @@ class DashboardController:
         design.protocol.spatial_values_cm = []
         design.protocol.catch_trial_percentage = 0.0
         design.protocol.include_baseline_trials = False
+        design.protocol.baseline_strategy = ""
+        design.protocol.baseline_trial_percentage = 0.0
         design.protocol.blocks = 1
         design.protocol.participants = 1
         with self._lock:
@@ -1019,6 +1022,7 @@ def _custom_workflow_status(design: StimulusDesign, participant_id: str) -> dict
         ("study", "Study Profile", _custom_study_missing(design)),
         ("stimulus", "Stimulus Design", _custom_stimulus_missing(design)),
         ("trials", "Trial Assembly", _custom_trials_missing(design)),
+        ("baseline", "Baseline Strategy", _custom_baseline_missing(design)),
         ("run", "Run Preparation", _custom_run_missing(participant_id)),
         ("review", "Review", []),
     ]
@@ -1041,8 +1045,8 @@ def _custom_workflow_status(design: StimulusDesign, participant_id: str) -> dict
         for step_id, label, missing in step_checks
     ]
     current_step = next((step["id"] for step in steps if not step["complete"]), "review")
-    render_missing = _missing_for_steps(steps, {"study", "stimulus", "trials"})
-    prepare_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "run"})
+    render_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "baseline"})
+    prepare_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "baseline", "run"})
     return {
         "is_custom": True,
         "current_step": current_step,
@@ -1065,7 +1069,11 @@ def _require_custom_workflow_ready(
     ready_key = "ready_to_prepare" if require_participant else "ready_to_render"
     if workflow[ready_key]:
         return
-    step_ids = {"study", "stimulus", "trials", "run"} if require_participant else {"study", "stimulus", "trials"}
+    step_ids = (
+        {"study", "stimulus", "trials", "baseline", "run"}
+        if require_participant
+        else {"study", "stimulus", "trials", "baseline"}
+    )
     missing = _missing_for_steps(workflow["steps"], step_ids)
     raise RuntimeError(f"Custom design is incomplete: {'; '.join(missing)}")
 
@@ -1130,6 +1138,21 @@ def _custom_trials_missing(design: StimulusDesign) -> list[str]:
         missing.append("Keep at least one tactile site.")
     if not p.respiratory_phases:
         missing.append("Keep at least one respiratory phase.")
+    return missing
+
+
+def _custom_baseline_missing(design: StimulusDesign) -> list[str]:
+    p = design.protocol
+    strategy = str(p.baseline_strategy or "").strip().lower()
+    if strategy not in SUPPORTED_BASELINE_STRATEGIES:
+        return ["Choose a baseline strategy."]
+    if strategy == "none":
+        return []
+    missing: list[str] = []
+    if p.baseline_trial_percentage <= 0:
+        missing.append("Set a baseline proportion above 0%.")
+    if strategy == "custom" and not p.baseline_soa_values_ms:
+        missing.append("Enter at least one custom baseline timing value.")
     return missing
 
 

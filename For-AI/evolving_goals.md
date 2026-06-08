@@ -61,6 +61,10 @@ This file is the dated project memory. Add a new dated entry when a chat or impl
 - Trial Designer within-block event sequences now include a compact prelisten button. It calls the local companion to assemble a temporary stereo browser-preview WAV from the sequence's fixed clips plus one randomly selected looming source. This is an auditory convenience preview only; tactile output and validated timing still belong to native session preparation/Focus Mode.
 - Added `For-AI/skills/html-dashboard-orchestrator/` as a project-local, Codex-skill-shaped workflow for future HTML dashboard changes. Use it to keep browser GUI edits connected to backend contracts, local-only file handling, GitHub Pages synchronization, browser validation, and concise project-memory updates.
 
+## 2026-06-08
+
+- The HTML dashboard now treats baseline strategy as a separate forced decision segment after Trial Designer and before Run Setup. The supported visible tactics are no baseline, tactile-only timing anchors, SOA 0, sound-offset/end anchor, and custom baseline timings. The segment estimates baseline trials per block/experiment and whole-experiment duration from the current event rows, selected stimuli, SOAs, repetitions, blocks, catch percentage, and baseline proportion; the backend scheduler materializes the actual baseline rows and CSV/manifest fields.
+
 ## Active Implementation Backlog
 
 - Hide randomization strategy, block-order strategy, max-consecutive-same-type, and seed from the main Trial Assembler UI.

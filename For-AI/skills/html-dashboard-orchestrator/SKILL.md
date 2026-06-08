@@ -40,7 +40,7 @@ In this repo:
    - Keep one-page navigation and direct panel resizing behavior intact.
    - Treat one-page website sections as workflow segments. Each segment should represent one natural user decision stage, and panels should stay localized to the segment where that decision is made.
    - Do not let unrelated controls share a segment just because they fit on screen. Move participant/session/run controls, previews, backend feedback, or review panes to the functional segment that owns them.
-   - For the PPS dashboard, preserve the sequence: profile decision, looming-stimulus builder, trial designer, then run/session review. The looming-stimulus builder owns trajectory controls, preview, source staging/baking, baked-source cards, and bake/render feedback; the trial designer owns within-block event sequences, SOAs, repetitions, blocks, catch percentage, and trial preview.
+   - For the PPS dashboard, preserve the sequence: profile decision, looming-stimulus builder, trial designer, baseline strategy, then run/session review. The looming-stimulus builder owns trajectory controls, preview, source staging/baking, baked-source cards, and bake/render feedback; the trial designer owns within-block event sequences, SOAs, repetitions, blocks, catch percentage, and trial preview; the baseline segment owns baseline tactic, timing anchors, proportion, live trial-count feedback, and experiment-duration estimates.
    - Treat filmstrip/event-sequence rows as sequential events inside the current block, not as separate blocks or block definitions. Keep visible labels aligned with this mental model even if internal schema names still use `trial_strips`.
 
 4. Keep source and file handling local.
@@ -86,6 +86,7 @@ For UI layout transfer, use workflow segmentation before panel placement:
 - Put only the controls, previews, and status feedback needed for that stage inside that section.
 - Keep later-stage setup and review panels lower on the page, even if they are technically related to earlier data.
 - Keep navigation, validation gates, and "continue" actions aligned with these same stages.
+- When a decision depends on earlier choices, place it after those choices rather than hiding it in the earlier segment. For example, baseline trial proportion depends on event rows, selected looming sources, SOAs, repetitions, and blocks, so it belongs after Trial Designer and before Run Setup.
 
 ## References
 

@@ -23,6 +23,7 @@ SUPPORTED_TRIAL_STRIP_ELEMENT_TYPES = ("fixed_audio", "looming_stimulus")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
+SUPPORTED_BASELINE_STRATEGIES = ("none", "tactile_only", "soa_zero", "sound_offset", "custom")
 SUPPORTED_TRIAL_RANDOMIZATION = ("balanced_shuffle", "no_immediate_repeats", "ordered")
 SUPPORTED_BLOCK_ORDER_RANDOMIZATION = ("counterbalanced_rotation", "seeded_random_permutation", "fixed")
 DEFAULT_SOFA_FILE = "assets/0. Head-Related Impulse Response (HRIR) model/FABIAN_HRIR_measured_HATO_0.sofa"
@@ -129,6 +130,8 @@ class ProtocolSpec:
     catch_trial_percentage: float = 10.0
     catch_trials_exact: int | None = None
     include_baseline_trials: bool = True
+    baseline_strategy: str = "tactile_only"
+    baseline_trial_percentage: float = 0.0
     baseline_soa_values_ms: list[int] = field(default_factory=list)
     respiratory_phases: list[str] = field(default_factory=lambda: ["Inhale", "Exhale"])
     blocks: int = 6
@@ -436,6 +439,12 @@ def validate_design(design: StimulusDesign) -> list[str]:
         warnings.append("Catch-trial percentage must be between 0 and 99.9.")
     if p.catch_trials_exact is not None and p.catch_trials_exact < 0:
         warnings.append("Exact catch-trial count cannot be negative.")
+    if p.baseline_strategy not in SUPPORTED_BASELINE_STRATEGIES:
+        warnings.append(f"Unsupported baseline strategy: {p.baseline_strategy}")
+    if not 0 <= p.baseline_trial_percentage < 100:
+        warnings.append("Baseline-trial percentage must be between 0 and 99.9.")
+    if p.include_baseline_trials and p.baseline_strategy == "custom" and not p.baseline_soa_values_ms:
+        warnings.append("Custom baseline strategy requires at least one baseline timing value.")
     if any(soa < -10000 for soa in p.baseline_soa_values_ms):
         warnings.append("Baseline SOA values look implausibly early.")
     if not using_trial_strips and not p.respiratory_phases:
@@ -527,11 +536,67 @@ def protocol_factor_pairs(protocol: ProtocolSpec) -> list[tuple[int, float]]:
     ]
 
 
-def baseline_factor_pairs(protocol: ProtocolSpec) -> list[tuple[int, float]]:
-    if not protocol.baseline_soa_values_ms:
-        return protocol_factor_pairs(protocol)
+def _baseline_strategy(protocol: ProtocolSpec) -> str:
+    strategy = str(protocol.baseline_strategy or "").strip().lower()
+    if not protocol.include_baseline_trials:
+        return "none"
+    if strategy in SUPPORTED_BASELINE_STRATEGIES:
+        return strategy
+    return "tactile_only"
+
+
+def _sound_offset_ms(trajectory: TrajectorySpec | None) -> int:
+    if trajectory is None:
+        return 0
+    return int(round(max(0.0, trajectory.total_duration_s) * 1000.0))
+
+
+def baseline_timing_values_ms(protocol: ProtocolSpec, trajectory: TrajectorySpec | None = None) -> list[int]:
+    strategy = _baseline_strategy(protocol)
+    if strategy == "none":
+        return []
+    if strategy == "soa_zero":
+        return [0]
+    if strategy == "sound_offset":
+        return [_sound_offset_ms(trajectory)]
+    if protocol.baseline_soa_values_ms:
+        return list(protocol.baseline_soa_values_ms)
+    if strategy == "custom":
+        return []
+    return [soa for soa, _spatial in protocol_factor_pairs(protocol)]
+
+
+def baseline_factor_pairs(protocol: ProtocolSpec, trajectory: TrajectorySpec | None = None) -> list[tuple[int, float]]:
+    timing_values = baseline_timing_values_ms(protocol, trajectory)
+    if not timing_values:
+        return []
     spatial = protocol.spatial_values_cm[0] if protocol.spatial_values_cm else 0.0
-    return [(soa, spatial) for soa in protocol.baseline_soa_values_ms]
+    return [(soa, spatial) for soa in timing_values]
+
+
+def baseline_target_count(protocol: ProtocolSpec, reference_trial_count: int, candidate_count: int) -> int:
+    if not protocol.include_baseline_trials or _baseline_strategy(protocol) == "none":
+        return 0
+    if candidate_count <= 0:
+        return 0
+    percentage = float(protocol.baseline_trial_percentage or 0.0)
+    if percentage <= 0:
+        return candidate_count
+    if reference_trial_count <= 0:
+        return candidate_count
+    return max(1, int(math.ceil(reference_trial_count * percentage / (100.0 - percentage))))
+
+
+def _select_baseline_rows(candidates: list[dict[str, Any]], target_count: int) -> list[dict[str, Any]]:
+    if not candidates or target_count <= 0:
+        return []
+    selected: list[dict[str, Any]] = []
+    for index in range(target_count):
+        row = dict(candidates[index % len(candidates)])
+        row["baseline_sample_index"] = index + 1
+        row["trial_unit_key"] = _slug(f"{row.get('trial_unit_key', 'baseline')}_{index + 1}")
+        selected.append(row)
+    return selected
 
 
 def has_trial_strips(protocol: ProtocolSpec) -> bool:
@@ -645,6 +710,54 @@ def _filmstrip_condition_rows_for_strip(
     return rows
 
 
+def _filmstrip_baseline_rows_for_strip(
+    design: StimulusDesign,
+    strip: TrialStripSpec,
+    strip_index: int,
+) -> list[dict[str, Any]]:
+    protocol = design.protocol
+    baseline_pairs = baseline_factor_pairs(protocol, design.trajectory)
+    if not baseline_pairs:
+        return []
+    fixed_clips = _strip_fixed_audio(strip, design)
+    fixed_labels = [clip.label for clip in fixed_clips]
+    fixed_paths = [clip.path for clip in fixed_clips]
+    strip_id = strip.strip_id or f"strip-{strip_index}"
+    strip_label = strip.label or f"Event {strip_index}"
+    rows: list[dict[str, Any]] = []
+    tactile_sites = protocol.tactile_sites or ["hand"]
+    sequence_labels = fixed_labels + ["Baseline tactile"]
+
+    for repetition in range(1, protocol.repetitions_per_condition + 1):
+        for tactile_site in tactile_sites:
+            for soa_ms, spatial_cm in baseline_pairs:
+                rows.append(
+                    {
+                        "trial_type": "Baseline",
+                        "repetition": repetition,
+                        "tactile_site": tactile_site,
+                        "motion_direction": "",
+                        "phase": strip_label,
+                        "soa_ms": soa_ms,
+                        "spatial_value_cm": spatial_cm,
+                        "noise_label": "",
+                        "noise_type": "",
+                        "azimuth_deg": "",
+                        "elevation_deg": "",
+                        "trial_strip_id": strip_id,
+                        "trial_strip_label": strip_label,
+                        "trial_strip_index": strip_index,
+                        "tactile_enabled": True,
+                        "fixed_audio_labels": "; ".join(fixed_labels),
+                        "fixed_audio_paths": "; ".join(fixed_paths),
+                        "sequence_labels": " | ".join(sequence_labels),
+                        "trial_unit_key": _slug(f"{strip_id}_baseline_{soa_ms}_{repetition}"),
+                        "baseline_strategy": _baseline_strategy(protocol),
+                    }
+                )
+    return rows
+
+
 def _with_filmstrip_catches(rows: list[dict[str, Any]], protocol: ProtocolSpec) -> list[dict[str, Any]]:
     if protocol.catch_trials_exact is not None:
         catch_count = protocol.catch_trials_exact
@@ -670,12 +783,41 @@ def _filmstrip_block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     scheduled: list[dict[str, Any]] = []
     strips = [strip for strip in protocol.trial_strips if strip.elements]
     for block_index, block in enumerate(effective_block_specs(protocol), start=1):
-        if "Audio-Tactile" not in block.stimulus_types and "Catch" not in block.stimulus_types:
+        if not any(trial_type in block.stimulus_types for trial_type in ("Audio-Tactile", "Baseline", "Catch")):
             continue
-        strip_queues: list[list[dict[str, Any]]] = []
+        strip_payloads: list[tuple[int, list[dict[str, Any]]]] = []
+        baseline_candidates: list[dict[str, Any]] = []
+        block_audio_count = 0
         for strip_index, strip in enumerate(strips, start=1):
-            rows = _filmstrip_condition_rows_for_strip(design, strip, strip_index)
-            rows = _with_filmstrip_catches(rows, protocol)
+            audio_rows = (
+                _filmstrip_condition_rows_for_strip(design, strip, strip_index)
+                if "Audio-Tactile" in block.stimulus_types or "Catch" in block.stimulus_types
+                else []
+            )
+            rows = list(audio_rows) if "Audio-Tactile" in block.stimulus_types else []
+            block_audio_count += len(audio_rows)
+            if "Catch" in block.stimulus_types:
+                rows.extend(
+                    row
+                    for row in _with_filmstrip_catches(audio_rows, protocol)
+                    if row.get("trial_type") == "Catch"
+                )
+            if "Baseline" in block.stimulus_types:
+                baseline_candidates.extend(_filmstrip_baseline_rows_for_strip(design, strip, strip_index))
+            strip_payloads.append((strip_index, rows))
+        selected_baselines = _select_baseline_rows(
+            baseline_candidates,
+            baseline_target_count(protocol, block_audio_count, len(baseline_candidates)),
+        )
+        baselines_by_strip: dict[int, list[dict[str, Any]]] = {}
+        for row in selected_baselines:
+            baselines_by_strip.setdefault(int(row.get("trial_strip_index") or 0), []).append(row)
+        strip_queues: list[list[dict[str, Any]]] = []
+        for strip_index, rows in strip_payloads:
+            rows = list(rows)
+            rows.extend(baselines_by_strip.get(strip_index, []))
+            if not rows:
+                continue
             randomized = _randomize_rows(
                 rows,
                 protocol,
@@ -730,12 +872,13 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                             )
 
     if protocol.include_baseline_trials:
-        baseline_pairs = baseline_factor_pairs(protocol)
+        baseline_pairs = baseline_factor_pairs(protocol, design.trajectory)
+        baseline_candidates: list[dict[str, Any]] = []
         for repetition in repetitions:
             for tactile_site in protocol.tactile_sites:
                 for phase in protocol.respiratory_phases:
                     for soa_ms, spatial_cm in baseline_pairs:
-                        rows.append(
+                        baseline_candidates.append(
                             {
                                 "trial_type": "Baseline",
                                 "repetition": repetition,
@@ -748,8 +891,13 @@ def protocol_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                                 "noise_type": "",
                                 "azimuth_deg": "",
                                 "elevation_deg": "",
+                                "baseline_strategy": _baseline_strategy(protocol),
                             }
                         )
+        rows.extend(_select_baseline_rows(
+            baseline_candidates,
+            baseline_target_count(protocol, len(rows), len(baseline_candidates)),
+        ))
 
     noncatch_count = len(rows)
     if protocol.catch_trials_exact is not None:
@@ -966,7 +1114,34 @@ def experiment_schedule_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     return scheduled
 
 
-def protocol_summary(design: StimulusDesign) -> dict[str, int]:
+def _fixed_audio_duration_s(design: StimulusDesign, label: str) -> float:
+    for asset in design.prestimulus_files:
+        if asset.label == label:
+            return max(0.0, float(asset.target_duration_s or 0.0))
+    return 0.0
+
+
+def _source_duration_s(design: StimulusDesign, label: str) -> float:
+    for asset in design.custom_looming_files:
+        if asset.label == label:
+            return max(0.0, float(asset.target_duration_s or 0.0))
+    return max(0.0, float(design.trajectory.total_duration_s or 0.0))
+
+
+def _row_estimated_duration_s(design: StimulusDesign, row: dict[str, Any]) -> float:
+    fixed_labels = [
+        label.strip()
+        for label in str(row.get("fixed_audio_labels", "")).split(";")
+        if label.strip()
+    ]
+    fixed_duration = sum(_fixed_audio_duration_s(design, label) for label in fixed_labels)
+    sound_window = _source_duration_s(design, str(row.get("noise_label") or ""))
+    if row.get("trial_type") == "Baseline":
+        sound_window = max(sound_window, max(0, int(row.get("soa_ms") or 0)) / 1000.0)
+    return max(0.1, fixed_duration + sound_window)
+
+
+def protocol_summary(design: StimulusDesign) -> dict[str, Any]:
     rows = block_trial_rows(design)
     audio_tactile = sum(1 for row in rows if row["trial_type"] == "Audio-Tactile")
     baseline = sum(1 for row in rows if row["trial_type"] == "Baseline")
@@ -976,6 +1151,8 @@ def protocol_summary(design: StimulusDesign) -> dict[str, int]:
     block_counts: dict[str, int] = {}
     for row in rows:
         block_counts[str(row["block_label"])] = block_counts.get(str(row["block_label"]), 0) + 1
+    estimated_participant_s = sum(_row_estimated_duration_s(design, row) for row in rows)
+    baseline_denominator = max(1, audio_tactile + baseline)
     return {
         "audio_tactile_trials": audio_tactile,
         "baseline_trials": baseline,
@@ -987,6 +1164,12 @@ def protocol_summary(design: StimulusDesign) -> dict[str, int]:
         "max_trials_per_block": max(block_counts.values(), default=0),
         "participants": design.protocol.participants,
         "total_participant_trials": total * design.protocol.participants,
+        "baseline_actual_percent": round(100.0 * baseline / baseline_denominator, 1),
+        "estimated_participant_minutes": round(estimated_participant_s / 60.0, 1),
+        "estimated_all_participants_hours": round(
+            estimated_participant_s * max(1, design.protocol.participants) / 3600.0,
+            1,
+        ),
     }
 
 
@@ -1018,6 +1201,8 @@ def export_protocol_csv(design: StimulusDesign, path: Path) -> None:
         "fixed_audio_labels",
         "fixed_audio_paths",
         "sequence_labels",
+        "baseline_strategy",
+        "baseline_sample_index",
         "trial_unit_key",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:

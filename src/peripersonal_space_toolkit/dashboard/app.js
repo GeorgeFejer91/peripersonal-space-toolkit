@@ -2,18 +2,20 @@ let state = null;
 let viewerReady = false;
 const activePolls = new Set();
 const CUSTOM_TEMPLATE_ID = "__custom__";
-const WORKFLOW_STEPS = ["study", "stimulus", "trials", "run", "review"];
+const WORKFLOW_STEPS = ["study", "stimulus", "trials", "baseline", "run", "review"];
 const STEP_TARGETS = {
   study: "study",
   stimulus: "stimulus",
   trials: "trials",
+  baseline: "baseline",
   run: "run",
   review: "review"
 };
 const NEXT_STEP = {
   study: "stimulus",
   stimulus: "trials",
-  trials: "run",
+  trials: "baseline",
+  baseline: "run",
   run: "review"
 };
 const LOCAL_BACKEND_DEFAULT = "http://127.0.0.1:8766";
@@ -44,6 +46,32 @@ const STIMULUS_SNIPPET_PLACEMENTS = [
   { value: "before", label: "Before stimulus" },
   { value: "after", label: "After stimulus" }
 ];
+const BASELINE_STRATEGY_NOTES = {
+  "": {
+    label: "Baseline decision required",
+    note: "Choose the baseline family before preparing a custom run."
+  },
+  none: {
+    label: "No baseline trials",
+    note: "Use when the profile does not need tactile-only or timing-anchor baseline trials."
+  },
+  tactile_only: {
+    label: "Tactile-only timing anchors",
+    note: "Canzoneri-style T0/T6 and several PPS profiles use tactile trials without the looming source, often before/after or at matched timing anchors."
+  },
+  soa_zero: {
+    label: "Tactile at sound onset / SOA 0",
+    note: "Use a synchronous timing anchor when the baseline/control is defined by tactile delivery at auditory onset."
+  },
+  sound_offset: {
+    label: "Tactile at sound offset / end",
+    note: "Use a late timing anchor when the baseline/control samples tactile detection at the end of the looming window."
+  },
+  custom: {
+    label: "Custom baseline timing values",
+    note: "Use for paper-specific tactile-only timings such as pre-sound and post-sound anchors or full SOA-matched baseline sets."
+  }
+};
 const TRAJECTORY_FIELD_IDS = [
   "start-distance",
   "end-distance",
@@ -172,6 +200,7 @@ function renderAll() {
   renderStudy();
   renderStimulus();
   renderTrials();
+  renderBaseline();
   renderRun();
   renderReview();
   renderPreviewTables();
@@ -571,6 +600,131 @@ function renderTrials() {
   }
 }
 
+function renderBaseline() {
+  const protocol = state.design.protocol || {};
+  const savedStrategy = protocol.include_baseline_trials === false
+    ? "none"
+    : (protocol.baseline_strategy || "tactile_only");
+  $("baseline-strategy").value = savedStrategy;
+  $("baseline-percent").value = savedStrategy === "none" ? 0 : (protocol.baseline_trial_percentage ?? 0);
+  $("baseline-soa-values").value = formatList(protocol.baseline_soa_values_ms || []);
+  updateBaselineDecision();
+}
+
+function currentBaselineStrategy() {
+  return $("baseline-strategy").value || "";
+}
+
+function derivedBaselineTimingsMs(strategy = currentBaselineStrategy()) {
+  if (strategy === "none" || !strategy) return [];
+  if (strategy === "soa_zero") return [0];
+  if (strategy === "sound_offset") {
+    const controls = currentTrajectoryControls();
+    return [Math.round((controls.start_hold_s + controls.movement_duration_s + controls.end_hold_s) * 1000)];
+  }
+  const custom = parseIntegerList($("baseline-soa-values").value);
+  if (custom.length) return custom;
+  return parseIntegerList($("soa-values").value);
+}
+
+function eventSequenceAudioCountPerBlock() {
+  const soaCount = parseIntegerList($("soa-values").value).length;
+  const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
+  const fallbackSourceCount = Math.max(1, stimulusSourceDetailsFromDom().length);
+  let total = 0;
+  const rows = [...$("filmstrip-list").querySelectorAll(".filmstrip-row")];
+  if (!rows.length) return fallbackSourceCount * soaCount * repetitions;
+  for (const row of rows) {
+    const slot = row.querySelector('.filmstrip-element[data-element-kind="looming_stimulus"]');
+    const selected = slot ? slot.querySelectorAll('[data-element-field="source_labels"] option:checked').length : 0;
+    total += Math.max(1, selected || fallbackSourceCount) * soaCount * repetitions;
+  }
+  return total;
+}
+
+function baselineCountEstimate() {
+  const strategy = currentBaselineStrategy();
+  const blocks = Math.max(1, Math.round(numberValue("blocks", 1)));
+  if (!strategy || strategy === "none") {
+    return { strategy, timings: [], perBlock: 0, total: 0, actualPercent: 0, audioPerBlock: eventSequenceAudioCountPerBlock() };
+  }
+  const timings = derivedBaselineTimingsMs(strategy);
+  const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
+  const tactileSiteCount = Math.max(1, (state.design.protocol?.tactile_sites || ["hand"]).length);
+  const rowCount = Math.max(1, $("filmstrip-list").querySelectorAll(".filmstrip-row").length);
+  const candidates = Math.max(0, rowCount * repetitions * tactileSiteCount * timings.length);
+  const audioCount = Math.max(0, eventSequenceAudioCountPerBlock());
+  const percent = Math.max(0, Math.min(99, numberValue("baseline-percent", 0)));
+  const perBlock = percent > 0 && audioCount > 0
+    ? Math.max(1, Math.ceil(audioCount * percent / (100 - percent)))
+    : candidates;
+  const denominator = Math.max(1, audioCount + perBlock);
+  return {
+    strategy,
+    timings,
+    perBlock,
+    total: perBlock * blocks,
+    actualPercent: Math.round((1000 * perBlock / denominator)) / 10,
+    audioPerBlock: audioCount,
+  };
+}
+
+function estimatedTrialSeconds() {
+  const controls = currentTrajectoryControls();
+  const soundWindow = controls.start_hold_s + controls.movement_duration_s + controls.end_hold_s;
+  const firstStrip = state.design.protocol?.trial_strips?.[0];
+  const fixedLabels = (firstStrip?.elements || [])
+    .filter((element) => element.kind === "fixed_audio")
+    .map((element) => element.source_label || element.label)
+    .filter(Boolean);
+  const fixedSeconds = fixedLabels.reduce((total, label) => {
+    const clip = (state.design.prestimulus_files || []).find((item) => item.label === label);
+    return total + Number(clip?.target_duration_s || 0);
+  }, 0);
+  return Math.max(0.1, fixedSeconds + soundWindow);
+}
+
+function updateBaselineDecision() {
+  const strategy = currentBaselineStrategy();
+  const status = $("baseline-status");
+  const valid = strategy && (strategy === "none" || numberValue("baseline-percent", 0) > 0);
+  status.textContent = valid ? "ready" : "required";
+  status.className = `status-label ${valid ? "ready" : "required"}`;
+
+  const note = BASELINE_STRATEGY_NOTES[strategy] || BASELINE_STRATEGY_NOTES[""];
+  $("baseline-literature").innerHTML = `<strong>${escapeHtml(note.label)}</strong><span>${escapeHtml(note.note)}</span>`;
+
+  const timingField = $("baseline-soa-values");
+  const customTiming = strategy === "custom" || strategy === "tactile_only";
+  timingField.disabled = !customTiming;
+  timingField.closest(".field-row").classList.toggle("muted-control", !customTiming);
+  if (strategy === "none") $("baseline-percent").value = 0;
+
+  const estimate = baselineCountEstimate();
+  const summary = $("baseline-summary");
+  const blocks = Math.max(1, Math.round(numberValue("blocks", 1)));
+  const catchPercent = Math.max(0, Math.min(99, numberValue("catch-percent", 0)));
+  const catchPerBlock = estimate.audioPerBlock > 0 && catchPercent > 0
+    ? Math.ceil(estimate.audioPerBlock * catchPercent / (100 - catchPercent))
+    : 0;
+  const liveTrials = (estimate.audioPerBlock + estimate.perBlock + catchPerBlock) * blocks;
+  const participantMinutes = Math.round((liveTrials * estimatedTrialSeconds() / 60) * 10) / 10;
+  summary.innerHTML = "";
+  const rows = {
+    timing_values_ms: estimate.timings.length ? estimate.timings.join(", ") : "none",
+    baseline_trials_per_block: estimate.perBlock,
+    baseline_trials_total: estimate.total,
+    actual_baseline_percent: `${estimate.actualPercent}%`,
+    estimated_participant_minutes: participantMinutes,
+  };
+  for (const [key, value] of Object.entries(rows)) {
+    const item = document.createElement("div");
+    item.className = "summary-item";
+    item.innerHTML = `<span>${humanize(key)}</span><strong>${escapeHtml(String(value))}</strong>`;
+    summary.appendChild(item);
+  }
+}
+
 function renderTrialStrips() {
   const list = $("filmstrip-list");
   if (!list) return;
@@ -735,6 +889,7 @@ function updateFilmstripCounts() {
     const total = sourceCount * Math.max(soaCount, 0) * repetitions;
     count.textContent = `${sourceCount} stimuli x ${soaCount} SOAs x ${repetitions} reps = ${total} events/block`;
   }
+  updateBaselineDecision();
 }
 
 async function previewFilmstripRow(button) {
@@ -1020,6 +1175,10 @@ function collectPayload() {
   const legacySpatial = design.protocol?.spatial_values_cm?.length
     ? design.protocol.spatial_values_cm
     : [numberValue("end-distance", 10)];
+  const baselineStrategy = currentBaselineStrategy();
+  const baselineTimings = baselineStrategy === "tactile_only" || baselineStrategy === "custom"
+    ? parseIntegerList($("baseline-soa-values").value)
+    : [];
   design.protocol = {
     ...(design.protocol || {}),
     repetitions_per_condition: Math.max(1, Math.round(numberValue("repetitions", 1))),
@@ -1027,6 +1186,10 @@ function collectPayload() {
     spatial_values_cm: legacySpatial,
     pair_spatial_values_with_soas: false,
     catch_trial_percentage: numberValue("catch-percent", 0),
+    include_baseline_trials: Boolean(baselineStrategy && baselineStrategy !== "none"),
+    baseline_strategy: baselineStrategy,
+    baseline_trial_percentage: baselineStrategy === "none" ? 0 : numberValue("baseline-percent", 0),
+    baseline_soa_values_ms: baselineTimings,
     blocks: Math.max(1, Math.round(numberValue("blocks", 1))),
     participants: Math.max(1, Math.round(numberValue("participants", 1))),
     trial_strips: trialStrips
@@ -1723,6 +1886,10 @@ function wireEvents() {
   $("add-strip-row").addEventListener("click", () => addFilmstripRow());
   $("soa-values").addEventListener("input", updateFilmstripCounts);
   $("repetitions").addEventListener("input", updateFilmstripCounts);
+  $("blocks").addEventListener("input", updateBaselineDecision);
+  $("baseline-strategy").addEventListener("change", updateBaselineDecision);
+  $("baseline-percent").addEventListener("input", updateBaselineDecision);
+  $("baseline-soa-values").addEventListener("input", updateBaselineDecision);
   $("reset-camera").addEventListener("click", () => {
     callTrajectoryViewer("resetTrajectoryCamera");
   });

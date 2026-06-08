@@ -18,8 +18,9 @@
         <a href="#study" data-step-link="study"><span>1 Profile</span><strong data-step-state="study">1</strong></a>
         <a href="#stimulus" data-step-link="stimulus"><span>2 Stimuli</span><strong data-step-state="stimulus">2</strong></a>
         <a href="#trials" data-step-link="trials"><span>3 Trials</span><strong data-step-state="trials">3</strong></a>
-        <a href="#run" data-step-link="run"><span>Run Setup</span><strong data-step-state="run">4</strong></a>
-        <a href="#review" data-step-link="review"><span>Review</span><strong data-step-state="review">5</strong></a>
+        <a href="#baseline" data-step-link="baseline"><span>4 Baseline</span><strong data-step-state="baseline">4</strong></a>
+        <a href="#run" data-step-link="run"><span>5 Run Setup</span><strong data-step-state="run">5</strong></a>
+        <a href="#review" data-step-link="review"><span>6 Review</span><strong data-step-state="review">6</strong></a>
       </nav>
       <div class="companion-panel" aria-label="Local companion backend">
         <div class="layout-title">Local Companion</div>
@@ -247,7 +248,7 @@
           </div>
           <div id="protocol-summary" class="summary-grid"></div>
           <div class="step-footer">
-            <button type="button" class="primary" data-continue-step="trials">Continue To Run Prep</button>
+            <button type="button" class="primary" data-continue-step="trials">Continue To Baseline</button>
           </div>
         </section>
 
@@ -276,9 +277,48 @@
         </section>
       </section>
 
+      <section class="decision-segment" aria-labelledby="baseline-segment-title">
+        <div class="segment-heading">
+          <span class="segment-kicker">Segment 4</span>
+          <h2 id="baseline-segment-title">Baseline Strategy</h2>
+        </div>
+        <section id="baseline" class="panel" data-step-panel="baseline" data-resizable-panel data-panel-id="baseline">
+          <div class="panel-heading">
+            <div class="panel-title">Baseline Trial Design <span class="step-badge" data-step-badge="baseline"></span></div>
+            <span id="baseline-status" class="status-label">checking</span>
+          </div>
+          <div class="baseline-grid">
+            <div class="field-row">
+              <label for="baseline-strategy">Baseline tactic</label>
+              <select id="baseline-strategy">
+                <option value="">Choose baseline...</option>
+                <option value="none">No baseline trials</option>
+                <option value="tactile_only">Tactile-only timing anchors</option>
+                <option value="soa_zero">Tactile at sound onset / SOA 0</option>
+                <option value="sound_offset">Tactile at sound offset / end</option>
+                <option value="custom">Custom baseline timing values</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <label for="baseline-percent">Baseline percent</label>
+              <input id="baseline-percent" type="number" min="0" max="99" step="1">
+            </div>
+            <div class="field-row baseline-soa-field">
+              <label for="baseline-soa-values">Baseline timing values ms</label>
+              <input id="baseline-soa-values" type="text" autocomplete="off">
+            </div>
+          </div>
+          <div id="baseline-literature" class="baseline-strategy-note"></div>
+          <div id="baseline-summary" class="summary-grid"></div>
+          <div class="step-footer">
+            <button type="button" class="primary" data-continue-step="baseline">Continue To Run Prep</button>
+          </div>
+        </section>
+      </section>
+
       <section class="decision-segment" aria-labelledby="run-segment-title">
         <div class="segment-heading">
-          <span class="segment-kicker">Run</span>
+          <span class="segment-kicker">Segment 5</span>
           <h2 id="run-segment-title">Session Setup And Review</h2>
         </div>
         <section class="run-grid">

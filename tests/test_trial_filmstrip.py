@@ -97,6 +97,38 @@ def test_trial_strips_repetitions_and_catches_disable_tactile():
     assert all(row["tactile_enabled"] is False for row in catches)
 
 
+def test_trial_strips_add_baseline_events_inside_the_same_block():
+    design = _filmstrip_design(source_count=4)
+    design.protocol.include_baseline_trials = True
+    design.protocol.baseline_strategy = "soa_zero"
+    design.protocol.baseline_trial_percentage = 20
+
+    rows = block_trial_rows(design)
+    audio_tactile = [row for row in rows if row["trial_type"] == "Audio-Tactile"]
+    baselines = [row for row in rows if row["trial_type"] == "Baseline"]
+
+    assert len(audio_tactile) == 40
+    assert len(baselines) == 10
+    assert {row["block_label"] for row in baselines} == {"Block 1"}
+    assert {row["trial_strip_label"] for row in baselines} == {"Inhale event", "Exhale event"}
+    assert {row["soa_ms"] for row in baselines} == {0}
+    assert all(row["tactile_enabled"] is True for row in baselines)
+    assert all("Baseline tactile" in row["sequence_labels"] for row in baselines)
+
+
+def test_trial_strips_sound_offset_baseline_uses_stimulus_window_timing():
+    design = _filmstrip_design(source_count=1)
+    design.protocol.include_baseline_trials = True
+    design.protocol.baseline_strategy = "sound_offset"
+    design.protocol.baseline_trial_percentage = 10
+
+    baselines = [row for row in block_trial_rows(design) if row["trial_type"] == "Baseline"]
+
+    assert baselines
+    assert {row["soa_ms"] for row in baselines} == {4000}
+    assert {row["baseline_strategy"] for row in baselines} == {"sound_offset"}
+
+
 def test_filmstrip_protocol_csv_and_block_manifest_include_sequence_columns(tmp_path: Path):
     design = _filmstrip_design(source_count=1)
     design.protocol.soa_values_ms = [250]
@@ -112,6 +144,7 @@ def test_filmstrip_protocol_csv_and_block_manifest_include_sequence_columns(tmp_
 
     assert protocol_rows[0]["trial_strip_label"] in {"Inhale event", "Exhale event"}
     assert protocol_rows[0]["sequence_labels"]
+    assert "baseline_strategy" in protocol_rows[0]
     assert protocol_rows[0]["tactile_enabled"] == "True"
 
     package = prepare_run_package(
@@ -126,4 +159,5 @@ def test_filmstrip_protocol_csv_and_block_manifest_include_sequence_columns(tmp_
     assert "Trial_Strip_Label" in block_rows[0]
     assert "Sequence_Labels" in block_rows[0]
     assert "Tactile_Enabled" in block_rows[0]
+    assert "Baseline_Strategy" in block_rows[0]
     assert block_rows[0]["Sequence_Labels"]
