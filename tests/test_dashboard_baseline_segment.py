@@ -65,13 +65,28 @@ def test_dashboard_static_assets_include_baseline_segment():
 
     assert "Baseline Strategy" in html
     assert 'data-step-link="baseline"' in html
+    assert 'id="baseline-enabled"' in html
     assert 'id="baseline-strategy"' in html
+    assert 'id="baseline-options"' in html
     assert 'id="baseline-percent"' in html
+    assert 'id="catch-percent"' in html
     assert 'id="baseline-soa-values"' in html
+    assert "No baseline trials" in html
+    assert 'type="checkbox" name="baseline-option"' in html
+    assert "Use baseline trials" not in html
+    assert "Matched SOA anchors" in html
+    assert "Sound onset / min SOA" in html
+    assert "Sound offset / max SOA" in html
+    assert "Trial Sequence Design" in html
+    assert "Trial-Block Design" in html
+    assert "Default baseline %" not in html
+    assert "Default catch %" not in html
     assert "Continue To Baseline" in html
+    assert html.index("Baseline Strategy") < html.index("Trial Sequence Design") < html.index("Trial-Block Design")
     assert "BASELINE_STRATEGY_NOTES" in app_js
     assert "renderBaseline" in app_js
     assert "baselineCountEstimate" in app_js
+    assert "blockCompositionEstimate" in app_js
     assert "baseline_trial_percentage" in app_js
 
 

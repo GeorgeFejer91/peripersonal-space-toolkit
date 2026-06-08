@@ -25,6 +25,7 @@ from . import render_backend
 from .design import (
     AudioFileSpec,
     BlockSpec,
+    CUSTOM_AUDIO_NOISE_TYPE,
     NoiseDefinition,
     SUPPORTED_BASELINE_STRATEGIES,
     SUPPORTED_NOISE_TYPES,
@@ -73,6 +74,16 @@ DEFAULT_PREVIEW_DIR = REPO_ROOT / "local_data" / "dashboard_previews"
 TRIAL_PREVIEW_LIMIT = 240
 CUSTOM_TEMPLATE_IDS = {"custom", "__custom__"}
 DEFAULT_WEB_ORIGINS = ("https://georgefejer91.github.io",)
+STIMULUS_TRAJECTORY_COLORS = {
+    "pink": "#d783b5",
+    "blue": "#4b7fc4",
+    "white": "#d8dde2",
+    "brown": "#8b623f",
+    "violet": "#8364b9",
+    CUSTOM_AUDIO_NOISE_TYPE: "#246b55",
+    "preserve": "#246b55",
+    "spatialize": "#246b55",
+}
 
 
 @dataclass
@@ -155,7 +166,7 @@ class DashboardController:
             try:
                 design = load_design(self.design_path)
                 if not _should_replace_saved_design_with_default_profile(design):
-                    return _normalize_study5_event_sequence_labels(design)
+                    return _normalize_dashboard_design(design)
             except Exception:
                 pass
         return self._default_profile_design()
@@ -164,7 +175,7 @@ class DashboardController:
         template = next((item for item in self.templates if item.template_id == DEFAULT_STUDY_TEMPLATE_ID), None)
         if template is None:
             return default_design()
-        return _normalize_study5_event_sequence_labels(_copy_design(template.design))
+        return _normalize_dashboard_design(template.design)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -232,7 +243,7 @@ class DashboardController:
             raise KeyError(template_id)
         self.sync_preload_assets(template_id)
         with self._lock:
-            self.design = _normalize_study5_event_sequence_labels(_copy_design(template.design))
+            self.design = _normalize_dashboard_design(template.design)
             self.current_run_package = None
         return self.snapshot()
 
@@ -271,7 +282,7 @@ class DashboardController:
                 self.design = design_from_dict(payload)
             if "trajectory_controls" in payload:
                 self.design = _apply_trajectory_controls(self.design, dict(payload["trajectory_controls"]))
-            self.design = _normalize_study5_event_sequence_labels(self.design)
+            self.design = _normalize_dashboard_design(self.design)
             self.current_run_package = None
             save_design(self.design, self.design_path)
         return self.snapshot()
@@ -315,6 +326,13 @@ class DashboardController:
             design = _copy_design(self.design)
         label = _unique_stimulus_label(_bake_recipe_label(recipe), design)
         bake_design, source_kind, source_payload = _design_for_bake_recipe(design, recipe, label)
+        trajectory_snapshot = _stimulus_trajectory_snapshot(
+            design,
+            label=label,
+            source_kind=source_kind,
+            noise_type=str(source_payload.get("noise_type") or CUSTOM_AUDIO_NOISE_TYPE),
+        )
+        source_payload["trajectory_snapshot"] = trajectory_snapshot
         seed = int(design.protocol.random_seed or 20250604)
         render_dir = self.render_dir
 
@@ -335,6 +353,7 @@ class DashboardController:
 
             with self._lock:
                 if source_kind == "generated_noise":
+                    source_payload["prebaked_path"] = str(wav_path)
                     source = NoiseDefinition(**source_payload)
                     self.design.noises.append(source)
                     saved_source = asdict(source)
@@ -344,8 +363,10 @@ class DashboardController:
                         path=str(wav_path),
                         target_duration_s=float(source_payload.get("target_duration_s", design.trajectory.total_duration_s)),
                         render_mode="preserve",
+                        tone_type=str(source_payload.get("tone_type") or CUSTOM_AUDIO_NOISE_TYPE),
                         gain=1.0,
                         motion_mode="looming",
+                        trajectory_snapshot=trajectory_snapshot,
                     )
                     self.design.custom_looming_files.append(source)
                     saved_source = asdict(source)
@@ -697,6 +718,8 @@ def trajectory_viewer_payload(design: StimulusDesign, *, preview_mode: str = "2d
     start_spherical = cartesian_to_spherical(start["x_m"], start["y_m"], start["z_m"])
     end_spherical = cartesian_to_spherical(end["x_m"], end["y_m"], end["z_m"])
     radius_m = max(float(start_spherical["radius_m"]), float(end_spherical["radius_m"]), 0.1)
+    source_trajectories = _viewer_source_trajectories(design)
+    radius_m = max(radius_m, _viewer_source_radius_m(source_trajectories), 0.1)
     return {
         "preview_mode": preview_mode,
         "radius_m": radius_m,
@@ -704,7 +727,89 @@ def trajectory_viewer_payload(design: StimulusDesign, *, preview_mode: str = "2d
         "movement_duration_s": float(design.trajectory.movement_duration_s),
         "start": start,
         "end": end,
+        "source_trajectories": source_trajectories,
     }
+
+
+def _viewer_source_trajectories(design: StimulusDesign) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for noise in design.noises:
+        snapshot = dict(noise.trajectory_snapshot) or _stimulus_trajectory_snapshot(
+            design,
+            label=noise.label,
+            source_kind="generated_noise",
+            noise_type=noise.noise_type,
+        )
+        rows.append(_viewer_source_trajectory_row(
+            label=noise.label,
+            source_kind="generated_noise",
+            tone_type=noise.noise_type,
+            local_path=noise.prebaked_path,
+            snapshot=snapshot,
+        ))
+    for asset in design.custom_looming_files:
+        tone_type = asset.tone_type or _infer_tone_type(asset.label, default=CUSTOM_AUDIO_NOISE_TYPE)
+        snapshot = dict(asset.trajectory_snapshot) or _stimulus_trajectory_snapshot(
+            design,
+            label=asset.label,
+            source_kind="imported_audio",
+            noise_type=tone_type,
+        )
+        rows.append(_viewer_source_trajectory_row(
+            label=asset.label,
+            source_kind="imported_audio",
+            tone_type=tone_type,
+            local_path=asset.path,
+            snapshot=snapshot,
+        ))
+    return rows
+
+
+def _viewer_source_trajectory_row(
+    *,
+    label: str,
+    source_kind: str,
+    tone_type: str,
+    local_path: str,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    start = dict(snapshot.get("start") or {})
+    end = dict(snapshot.get("end") or {})
+    return {
+        "label": label,
+        "source_kind": source_kind,
+        "tone_type": tone_type,
+        "color_hex": _source_color_hex(tone_type),
+        "local_path": local_path,
+        "trajectory_snapshot": snapshot,
+        "start": start,
+        "end": end,
+        "path_length_m": snapshot.get("path_length_m"),
+        "movement_duration_s": snapshot.get("movement_duration_s"),
+    }
+
+
+def _viewer_source_radius_m(rows: list[dict[str, Any]]) -> float:
+    radii: list[float] = []
+    for row in rows:
+        for point in (row.get("start", {}), row.get("end", {})):
+            try:
+                radii.append(math.sqrt(float(point["x_m"]) ** 2 + float(point["y_m"]) ** 2 + float(point["z_m"]) ** 2))
+            except Exception:
+                continue
+    return max(radii, default=0.0)
+
+
+def _source_color_hex(tone_type: str) -> str:
+    return STIMULUS_TRAJECTORY_COLORS.get(str(tone_type or "").lower(), STIMULUS_TRAJECTORY_COLORS[CUSTOM_AUDIO_NOISE_TYPE])
+
+
+def _infer_tone_type(label: str, *, default: str) -> str:
+    text = str(label or "").lower()
+    for tone_type in SUPPORTED_NOISE_TYPES:
+        if tone_type in text:
+            return tone_type
+    return default
 
 
 def _apply_trajectory_controls(design: StimulusDesign, controls: dict[str, Any]) -> StimulusDesign:
@@ -765,7 +870,8 @@ def _trial_preview_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 "block": row.get("block_label", ""),
                 "trial": row.get("block_trial_index", ""),
                 "type": row.get("trial_type", ""),
-                "phase": row.get("trial_strip_label", row.get("phase", "")),
+                "trial_type": row.get("trial_type_label", row.get("trial_strip_label", row.get("phase", ""))),
+                "phase": row.get("trial_type_label", row.get("trial_strip_label", row.get("phase", ""))),
                 "soa_ms": row.get("soa_ms", ""),
                 "space_cm": row.get("spatial_value_cm", ""),
                 "tactile_site": row.get("tactile_site", ""),
@@ -892,7 +998,7 @@ def _write_trial_strip_preview_wav(path: Path, chunks: list[dict[str, Any]]) -> 
         import soundfile as sf
         from scipy import signal
     except ImportError as exc:
-        raise RuntimeError("Install numpy, scipy, and soundfile to preview event sequences.") from exc
+        raise RuntimeError("Install numpy, scipy, and soundfile to preview trial type rows.") from exc
 
     sample_rate = 0
     audio_chunks = []
@@ -1021,9 +1127,10 @@ def _custom_workflow_status(design: StimulusDesign, participant_id: str) -> dict
     step_checks = [
         ("study", "Study Profile", _custom_study_missing(design)),
         ("stimulus", "Stimulus Design", _custom_stimulus_missing(design)),
-        ("trials", "Trial Assembly", _custom_trials_missing(design)),
         ("baseline", "Baseline Strategy", _custom_baseline_missing(design)),
-        ("run", "Run Preparation", _custom_run_missing(participant_id)),
+        ("trials", "Trial Sequence Design", _custom_trials_missing(design)),
+        ("block", "Trial-Block Design", _custom_block_missing(design)),
+        ("run", "Run Preparation", _custom_run_missing(participant_id, design)),
         ("review", "Review", []),
     ]
     is_custom = _is_custom_design(design)
@@ -1045,8 +1152,8 @@ def _custom_workflow_status(design: StimulusDesign, participant_id: str) -> dict
         for step_id, label, missing in step_checks
     ]
     current_step = next((step["id"] for step in steps if not step["complete"]), "review")
-    render_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "baseline"})
-    prepare_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "baseline", "run"})
+    render_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "baseline", "block"})
+    prepare_missing = _missing_for_steps(steps, {"study", "stimulus", "trials", "baseline", "block", "run"})
     return {
         "is_custom": True,
         "current_step": current_step,
@@ -1070,9 +1177,9 @@ def _require_custom_workflow_ready(
     if workflow[ready_key]:
         return
     step_ids = (
-        {"study", "stimulus", "trials", "baseline", "run"}
+        {"study", "stimulus", "trials", "baseline", "block", "run"}
         if require_participant
-        else {"study", "stimulus", "trials", "baseline"}
+        else {"study", "stimulus", "trials", "baseline", "block"}
     )
     missing = _missing_for_steps(workflow["steps"], step_ids)
     raise RuntimeError(f"Custom design is incomplete: {'; '.join(missing)}")
@@ -1124,20 +1231,24 @@ def _custom_stimulus_missing(design: StimulusDesign) -> list[str]:
 def _custom_trials_missing(design: StimulusDesign) -> list[str]:
     missing: list[str] = []
     p = design.protocol
-    if p.repetitions_per_condition < 1:
-        missing.append("Set repetitions to at least 1.")
-    if p.blocks < 1:
-        missing.append("Set block count to at least 1.")
-    if p.participants < 1:
-        missing.append("Set planned participants to at least 1.")
-    if not p.soa_values_ms:
-        missing.append("Enter at least one SOA value.")
     if not has_trial_strips(p):
-        missing.append("Create at least one within-block event sequence.")
+        missing.append("Create at least one trial sequence row.")
     if not p.tactile_sites:
         missing.append("Keep at least one tactile site.")
     if not p.respiratory_phases:
         missing.append("Keep at least one respiratory phase.")
+    return missing
+
+
+def _custom_block_missing(design: StimulusDesign) -> list[str]:
+    missing: list[str] = []
+    p = design.protocol
+    if p.repetitions_per_condition < 1:
+        missing.append("Set repetitions to at least 1.")
+    if p.blocks < 1:
+        missing.append("Set block count to at least 1.")
+    if not p.soa_values_ms:
+        missing.append("Enter at least one SOA value.")
     return missing
 
 
@@ -1148,18 +1259,16 @@ def _custom_baseline_missing(design: StimulusDesign) -> list[str]:
         return ["Choose a baseline strategy."]
     if strategy == "none":
         return []
-    missing: list[str] = []
-    if p.baseline_trial_percentage <= 0:
-        missing.append("Set a baseline proportion above 0%.")
-    if strategy == "custom" and not p.baseline_soa_values_ms:
-        missing.append("Enter at least one custom baseline timing value.")
-    return missing
-
-
-def _custom_run_missing(participant_id: str) -> list[str]:
-    if not str(participant_id or "").strip():
-        return ["Enter a participant ID."]
     return []
+
+
+def _custom_run_missing(participant_id: str, design: StimulusDesign) -> list[str]:
+    missing: list[str] = []
+    if design.protocol.participants < 1:
+        missing.append("Set planned participants to at least 1.")
+    if not str(participant_id or "").strip():
+        missing.append("Enter a participant ID.")
+    return missing
 
 
 def _template_to_dict(template: StudyTemplate, *, asset_status: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1203,20 +1312,153 @@ def _copy_design(design: StimulusDesign) -> StimulusDesign:
     return design_from_dict(design_to_dict(design))
 
 
+def _normalize_dashboard_design(design: StimulusDesign) -> StimulusDesign:
+    updated = _normalize_study5_event_sequence_labels(_copy_design(design))
+    updated = _ensure_source_trajectory_snapshots(updated)
+    return _ensure_preload_source_assets(updated)
+
+
+def _ensure_source_trajectory_snapshots(design: StimulusDesign) -> StimulusDesign:
+    for noise in design.noises:
+        if noise.trajectory_snapshot:
+            continue
+        noise.trajectory_snapshot = _stimulus_trajectory_snapshot(
+            design,
+            label=noise.label,
+            source_kind="generated_noise",
+            noise_type=noise.noise_type,
+        )
+    for asset in design.custom_looming_files:
+        if asset.trajectory_snapshot:
+            continue
+        asset.trajectory_snapshot = _stimulus_trajectory_snapshot(
+            design,
+            label=asset.label,
+            source_kind="imported_audio",
+            noise_type=CUSTOM_AUDIO_NOISE_TYPE,
+        )
+    return design
+
+
+def _ensure_preload_source_assets(design: StimulusDesign) -> StimulusDesign:
+    assets = _preload_assets_by_label(design.study_profile_id)
+    if not assets:
+        return design
+    consumed: set[str] = set()
+    direction_labels = {
+        str(asset.get("direction_label") or "").strip()
+        for asset in assets.values()
+        if str(asset.get("direction_label") or "").strip()
+    }
+    for noise in design.noises:
+        key = _source_key(noise.label)
+        asset = assets.get(key)
+        if asset is None:
+            continue
+        consumed.add(key)
+        noise.prebaked_path = str(asset.get("path") or noise.prebaked_path or "")
+        if not noise.trajectory_snapshot and isinstance(asset.get("trajectory_snapshot"), dict):
+            noise.trajectory_snapshot = dict(asset.get("trajectory_snapshot") or {})
+    for audio in design.custom_looming_files:
+        key = _source_key(audio.label)
+        asset = assets.get(key)
+        if asset is None:
+            continue
+        consumed.add(key)
+        audio.path = str(asset.get("path") or audio.path or "")
+        if not audio.tone_type:
+            audio.tone_type = str(asset.get("noise_type") or asset.get("tone_type") or CUSTOM_AUDIO_NOISE_TYPE)
+        if not audio.trajectory_snapshot and isinstance(asset.get("trajectory_snapshot"), dict):
+            audio.trajectory_snapshot = dict(asset.get("trajectory_snapshot") or {})
+    for key, asset in assets.items():
+        if key in consumed:
+            continue
+        label = str(asset.get("label") or "").strip()
+        path = str(asset.get("path") or "").strip()
+        if not label or not path:
+            continue
+        design.custom_looming_files.append(
+            AudioFileSpec(
+                label=label,
+                path=path,
+                target_duration_s=float(asset.get("duration_s") or design.trajectory.total_duration_s or 4.0),
+                render_mode="preserve",
+                tone_type=str(asset.get("noise_type") or asset.get("tone_type") or CUSTOM_AUDIO_NOISE_TYPE),
+                gain=1.0,
+                motion_mode=str(asset.get("motion_mode") or "looming"),
+                trajectory_snapshot=dict(asset.get("trajectory_snapshot") or {}),
+            )
+        )
+    if len(direction_labels) > 1:
+        design.protocol.auditory_motion_directions = ["source_trajectory"]
+    return design
+
+
+def _preload_assets_by_label(template_id: str) -> dict[str, dict[str, Any]]:
+    if not template_id:
+        return {}
+    inventory = load_preload_inventory(REPO_ROOT)
+    for profile in inventory.get("profiles", []):
+        if profile.get("template_id") != template_id:
+            continue
+        return {
+            _source_key(str(asset.get("label") or "")): dict(asset)
+            for asset in profile.get("assets", [])
+            if str(asset.get("label") or "").strip()
+        }
+    return {}
+
+
+def _stimulus_trajectory_snapshot(
+    design: StimulusDesign,
+    *,
+    label: str = "",
+    source_kind: str = "",
+    noise_type: str = "",
+) -> dict[str, Any]:
+    controls = _trajectory_controls(design)
+    start, end = trajectory_endpoints_xyz(design.trajectory)
+    return {
+        "schema": "pps-stimulus-trajectory.v1",
+        "label": label,
+        "source_kind": source_kind,
+        "noise_type": noise_type,
+        "start_distance_cm": controls["start_distance_cm"],
+        "end_distance_cm": controls["end_distance_cm"],
+        "start_rotation_deg": controls["start_rotation_deg"],
+        "end_rotation_deg": controls["end_rotation_deg"],
+        "movement_duration_s": controls["movement_duration_s"],
+        "start_hold_s": controls["start_hold_s"],
+        "end_hold_s": controls["end_hold_s"],
+        "path_length_m": round(float(design.trajectory.path_length_m), 4),
+        "coordinate_mode": design.trajectory.coordinate_mode,
+        "path_direction": design.trajectory.path_direction,
+        "start": {key: round(float(value), 6) for key, value in start.items()},
+        "end": {key: round(float(value), 6) for key, value in end.items()},
+    }
+
+
 def _normalize_study5_event_sequence_labels(design: StimulusDesign) -> StimulusDesign:
     if design.study_profile_id != DEFAULT_STUDY_TEMPLATE_ID:
         return design
     updated = _copy_design(design)
     label_map = {
-        "Inhale row": "Inhale event",
-        "Exhale row": "Exhale event",
+        "Inhale row": "Inhale trial type",
+        "Exhale row": "Exhale trial type",
+        "Inhale event": "Inhale trial type",
+        "Exhale event": "Exhale trial type",
     }
     for strip in updated.protocol.trial_strips:
         strip.label = label_map.get(strip.label, strip.label)
     if "filmstrip trial rows" in updated.study_profile_notes:
         updated.study_profile_notes = updated.study_profile_notes.replace(
             "filmstrip trial rows",
+            "within-block trial type rows",
+        )
+    if "within-block event sequences" in updated.study_profile_notes:
+        updated.study_profile_notes = updated.study_profile_notes.replace(
             "within-block event sequences",
+            "within-block trial type rows",
         )
     return updated
 

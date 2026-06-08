@@ -2,20 +2,24 @@ let state = null;
 let viewerReady = false;
 const activePolls = new Set();
 const CUSTOM_TEMPLATE_ID = "__custom__";
-const WORKFLOW_STEPS = ["study", "stimulus", "trials", "baseline", "run", "review"];
+const PROFILE_RECREATION_NOTICE =
+  "Be aware: this is not the exact stimulus set used in the original study. This preload recreates the study's reported parameters within this interface, using the toolkit's local rendering and bundled profile assets.";
+const WORKFLOW_STEPS = ["study", "stimulus", "baseline", "trials", "block", "run", "review"];
 const STEP_TARGETS = {
   study: "study",
   stimulus: "stimulus",
-  trials: "trials",
   baseline: "baseline",
+  trials: "trials",
+  block: "block",
   run: "run",
   review: "review"
 };
 const NEXT_STEP = {
   study: "stimulus",
-  stimulus: "trials",
-  trials: "baseline",
-  baseline: "run",
+  stimulus: "baseline",
+  baseline: "trials",
+  trials: "block",
+  block: "run",
   run: "review"
 };
 const LOCAL_BACKEND_DEFAULT = "http://127.0.0.1:8766";
@@ -37,10 +41,28 @@ const PROCEDURAL_NOISE_TYPES = [
   { value: "violet", label: "Violet" },
   { value: "brown", label: "Brown" }
 ];
+const STIMULUS_TRAJECTORY_COLORS = {
+  pink: "#d783b5",
+  blue: "#4b7fc4",
+  white: "#d8dde2",
+  brown: "#8b623f",
+  violet: "#8364b9",
+  custom_audio: "#246b55",
+  preserve: "#246b55",
+  spatialize: "#246b55",
+  prestimulus: "#7b8288"
+};
+const SOURCE_COLOR_OPTIONS = [
+  { value: "pink", label: "Pink" },
+  { value: "blue", label: "Blue" },
+  { value: "white", label: "White" },
+  { value: "brown", label: "Brown" },
+  { value: "violet", label: "Violet" },
+  { value: "custom_audio", label: "Green / custom" }
+];
 const IMPORTED_AUDIO_HANDLING = [
-  { value: "spatialize", label: "Dry tone -> make looming" },
-  { value: "preserve", label: "Already looming / control" },
-  { value: "prestimulus", label: "Instruction snippet" }
+  { value: "spatialize", label: "Custom looming tone" },
+  { value: "preserve", label: "Custom audio clip" }
 ];
 const STIMULUS_SNIPPET_PLACEMENTS = [
   { value: "before", label: "Before stimulus" },
@@ -56,20 +78,20 @@ const BASELINE_STRATEGY_NOTES = {
     note: "Use when the profile does not need tactile-only or timing-anchor baseline trials."
   },
   tactile_only: {
-    label: "Tactile-only timing anchors",
-    note: "Canzoneri-style T0/T6 and several PPS profiles use tactile trials without the looming source, often before/after or at matched timing anchors."
+    label: "Matched SOA anchors",
+    note: "Tactile-only controls use the same timing anchors as the SOA values in the randomizer."
   },
   soa_zero: {
-    label: "Tactile at sound onset / SOA 0",
-    note: "Use a synchronous timing anchor when the baseline/control is defined by tactile delivery at auditory onset."
+    label: "Sound onset / min SOA",
+    note: "Baseline tactile cues occur at auditory onset, giving a synchronous/minimum-timing anchor."
   },
   sound_offset: {
-    label: "Tactile at sound offset / end",
-    note: "Use a late timing anchor when the baseline/control samples tactile detection at the end of the looming window."
+    label: "Sound offset / max SOA",
+    note: "Baseline tactile cues occur at the end of the sound window, giving a late/maximum-timing anchor."
   },
   custom: {
-    label: "Custom baseline timing values",
-    note: "Use for paper-specific tactile-only timings such as pre-sound and post-sound anchors or full SOA-matched baseline sets."
+    label: "Custom timing anchors",
+    note: "Baseline tactile cues use profile-specific timing anchors carried by the design/template."
   }
 };
 const TRAJECTORY_FIELD_IDS = [
@@ -83,6 +105,7 @@ const TRAJECTORY_FIELD_IDS = [
 ];
 
 const $ = (id) => document.getElementById(id);
+const cssEscape = (value) => (window.CSS && window.CSS.escape ? window.CSS.escape(String(value)) : String(value).replace(/["\\]/g, "\\$&"));
 let apiBase = "";
 let templateLoadInFlight = false;
 let pendingAudioImportMode = "preserve";
@@ -199,8 +222,8 @@ function renderAll() {
   renderHeader();
   renderStudy();
   renderStimulus();
-  renderTrials();
   renderBaseline();
+  renderTrials();
   renderRun();
   renderReview();
   renderPreviewTables();
@@ -240,6 +263,12 @@ function renderProfileSummary() {
   summary.innerHTML = href
     ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a>`
     : "";
+  const notice = $("profile-recreation-notice");
+  if (notice) {
+    const showNotice = Boolean(href && selectedId && selectedId !== CUSTOM_TEMPLATE_ID);
+    notice.hidden = !showNotice;
+    notice.textContent = showNotice ? PROFILE_RECREATION_NOTICE : "";
+  }
 }
 
 function renderPreloadAssetStatus() {
@@ -286,7 +315,7 @@ function renderStimulus() {
 function renderGeneratedNoiseSelect() {
   const select = $("generated-noise-select");
   const current = select.value;
-  select.innerHTML = '<option value="">Choose noise to bake...</option>';
+  select.innerHTML = '<option value="">Choose noise type to bake...</option>';
   for (const item of PROCEDURAL_NOISE_TYPES) {
     const option = document.createElement("option");
     option.value = item.value;
@@ -321,16 +350,20 @@ function renderNoiseTable() {
   for (const noise of state.design.noises || []) {
     const selectedNoise = String(noise.noise_type || "pink").toLowerCase();
     const wav = renderedWavForLabel(noise.label || `${noiseTypeLabel(selectedNoise)} noise`);
+    const localPath = noise.prebaked_path || wav?.path || "";
     const card = document.createElement("div");
     card.className = "source-card noise-source-card";
+    applySourceCardColor(card, selectedNoise);
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(noiseTypeLabel(selectedNoise))} noise</strong>
         <div class="source-card-actions">
-          ${sourceFolderAction(wav?.path)}
+          ${sourceFolderAction(localPath)}
           <button type="button" data-remove-noise>Remove</button>
         </div>
       </div>
+      ${stimulusTrajectoryHiddenFields(noise, selectedNoise, "generated_noise")}
+      <input data-field="prebaked_path" type="hidden" value="${escapeAttr(localPath)}">
       <div class="source-card-fields">
         <div class="field-row">
           <label>Label</label>
@@ -362,17 +395,21 @@ function renderNoiseTable() {
 
 function renderAudioTable() {
   const list = $("audio-list");
+  const snippetList = $("snippet-list");
   list.innerHTML = "";
+  snippetList.innerHTML = "";
   const customFiles = state.design.custom_looming_files || [];
   const snippets = state.design.prestimulus_files || [];
   const rows = [
     ...customFiles.map((item) => ({
       ...item,
       audio_role: item.render_mode || "preserve",
+      target_list: list,
     })),
     ...snippets.map((item) => ({
       ...item,
       audio_role: "prestimulus",
+      target_list: snippetList,
     }))
   ];
   for (const audio of rows) {
@@ -380,9 +417,12 @@ function renderAudioTable() {
     const placement = normalizeSnippetPlacement(audio.placement);
     const targetSource = audio.target_source_label || "";
     const phase = audio.phase || "";
+    const colorKey = role === "prestimulus" ? "prestimulus" : (audio.tone_type || audio.noise_type || "custom_audio");
+    const motionMode = String(audio.motion_mode || (role === "prestimulus" ? "stationary" : "looming")).toLowerCase();
     const card = document.createElement("div");
     card.className = "source-card audio-source-card";
     card.dataset.audioRole = role;
+    applySourceCardColor(card, colorKey);
     card.innerHTML = `
       <div class="source-card-heading">
         <strong>${escapeHtml(audioRoleTitle(role))}</strong>
@@ -391,20 +431,31 @@ function renderAudioTable() {
           <button type="button" data-remove-audio>Remove</button>
         </div>
       </div>
+      ${stimulusTrajectoryHiddenFields(audio, colorKey, role === "prestimulus" ? "fixed_audio" : "imported_audio")}
+      <input data-field="path" type="hidden" value="${escapeAttr(audio.path || "")}">
+      <input data-field="motion_mode" type="hidden" value="${escapeAttr(motionMode)}">
+      ${role === "prestimulus" ? `<input data-field="audio_role" type="hidden" value="prestimulus">` : ""}
+      ${role === "prestimulus" ? `<input data-field="tone_type" type="hidden" value="${escapeAttr(colorKey)}">` : ""}
       <div class="source-card-fields audio-source-fields">
+        ${role === "prestimulus" ? "" : `
         <div class="field-row">
           <label>Source handling</label>
           <select data-field="audio_role">
             ${IMPORTED_AUDIO_HANDLING.map((item) => `<option value="${item.value}" ${item.value === role ? "selected" : ""}>${item.label}</option>`).join("")}
           </select>
         </div>
+        `}
+        ${role === "prestimulus" ? "" : `
+        <div class="field-row source-color-field">
+          <label>Box color</label>
+          <select data-field="tone_type">
+            ${sourceColorOptions(colorKey)}
+          </select>
+        </div>
+        `}
         <div class="field-row">
           <label>Label</label>
           <input data-field="label" value="${escapeAttr(audio.label || "")}">
-        </div>
-        <div class="field-row audio-path-field">
-          <label>Local path</label>
-          <input data-field="path" value="${escapeAttr(audio.path || "")}">
         </div>
         <div class="field-row assembly-only">
           <label>Placement</label>
@@ -438,7 +489,177 @@ function renderAudioTable() {
         </div>
       </div>
     `;
-    list.appendChild(card);
+    audio.target_list.appendChild(card);
+  }
+}
+
+function stimulusTrajectoryHiddenFields(source, colorKey = "custom_audio", sourceKind = "") {
+  const snapshot = trajectorySnapshotForSource(source, colorKey, sourceKind);
+  const rawValue = escapeAttr(JSON.stringify(snapshot || {}));
+  return `<input data-field="trajectory_snapshot" type="hidden" value="${rawValue}">`;
+}
+
+function stimulusTrajectoryTrace(source, colorKey = "custom_audio", sourceKind = "") {
+  const snapshot = trajectorySnapshotForSource(source, colorKey, sourceKind);
+  const rawValue = escapeAttr(JSON.stringify(snapshot || {}));
+  if (!snapshot || sourceKind === "fixed_audio") return `<input data-field="trajectory_snapshot" type="hidden" value="${rawValue}">`;
+  const colors = trajectoryColorSet(snapshot, colorKey);
+  const color = colors[0] || sourceColor(colorKey);
+  const gradient = trajectoryGradient(colors);
+  const start = Number(snapshot.start_distance_cm || 0);
+  const end = Number(snapshot.end_distance_cm || 0);
+  const startRot = Number(snapshot.start_rotation_deg || 0);
+  const endRot = Number(snapshot.end_rotation_deg || 0);
+  const duration = Number(snapshot.movement_duration_s || 0);
+  const holdStart = Number(snapshot.start_hold_s || 0);
+  const holdEnd = Number(snapshot.end_hold_s || 0);
+  const path = Number(snapshot.path_length_m || Math.abs(start - end) / 100);
+  const title = `${start || "?"} -> ${end || "?"} cm`;
+  const detail = `${startRot} -> ${endRot} deg, ${duration}s move`;
+  const shared = colors.length > 1 ? `shared path, ${colors.length} tones` : "";
+  return `
+    <div class="stimulus-trajectory-trace" style="--trajectory-color: ${escapeAttr(color)}; --trajectory-gradient: ${escapeAttr(gradient)}">
+      <input data-field="trajectory_snapshot" type="hidden" value="${rawValue}">
+      <div class="stimulus-trajectory-line" aria-hidden="true">
+        <span class="trajectory-dot start"></span>
+        <span class="trajectory-dot end"></span>
+      </div>
+      <div class="stimulus-trajectory-text">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(detail)}</span>
+        <span>${escapeHtml(`${path.toFixed(2)} m path, holds ${holdStart}s/${holdEnd}s`)}</span>
+        ${shared ? `<span>${escapeHtml(shared)}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function trajectoryColorSet(snapshot, fallbackKey = "custom_audio") {
+  const fallback = sourceColor(fallbackKey);
+  const groupKey = trajectoryGroupKey(snapshot);
+  if (!groupKey || !state?.design) return [fallback];
+  const colors = [];
+  for (const source of stimulusInventorySources()) {
+    const sourceSnapshot = trajectorySnapshotForSource(source, source.color_key, source.source_kind);
+    if (trajectoryGroupKey(sourceSnapshot) !== groupKey) continue;
+    const color = sourceColor(source.color_key);
+    if (!colors.includes(color)) colors.push(color);
+  }
+  if (!colors.includes(fallback)) colors.unshift(fallback);
+  return colors.length ? colors : [fallback];
+}
+
+function stimulusInventorySources() {
+  return [
+    ...(state?.design?.noises || []).map((source) => ({
+      ...source,
+      source_kind: "generated_noise",
+      color_key: source.noise_type || "pink"
+    })),
+    ...(state?.design?.custom_looming_files || []).map((source) => ({
+      ...source,
+      source_kind: "imported_audio",
+      color_key: source.tone_type || source.noise_type || "custom_audio"
+    }))
+  ];
+}
+
+function trajectoryGroupKey(snapshot = {}) {
+  if (!snapshot || snapshot.start_distance_cm === undefined || snapshot.end_distance_cm === undefined) return "";
+  const fields = [
+    "start_distance_cm",
+    "end_distance_cm",
+    "start_rotation_deg",
+    "end_rotation_deg",
+    "movement_duration_s",
+    "start_hold_s",
+    "end_hold_s"
+  ];
+  const controlKey = fields.map((field) => roundedKeyPart(snapshot[field])).join("|");
+  const start = snapshot.start || {};
+  const end = snapshot.end || {};
+  const coordinateKey = ["x_m", "y_m", "z_m"]
+    .map((field) => `${roundedKeyPart(start[field])}:${roundedKeyPart(end[field])}`)
+    .join("|");
+  return `${controlKey}|${coordinateKey}`;
+}
+
+function roundedKeyPart(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(4) : "";
+}
+
+function sourceColor(key = "custom_audio") {
+  return STIMULUS_TRAJECTORY_COLORS[String(key || "").toLowerCase()] || STIMULUS_TRAJECTORY_COLORS.custom_audio;
+}
+
+function sourceColorOptions(selected = "custom_audio") {
+  const selectedValue = String(selected || "custom_audio").toLowerCase();
+  return SOURCE_COLOR_OPTIONS.map((item) =>
+    `<option value="${escapeAttr(item.value)}" ${item.value === selectedValue ? "selected" : ""}>${escapeHtml(item.label)}</option>`
+  ).join("");
+}
+
+function applySourceCardColor(card, colorKey = "custom_audio") {
+  if (!card) return;
+  const color = sourceColor(colorKey);
+  card.style.setProperty("--source-card-color", color);
+  card.style.setProperty("--source-card-color-soft", colorWithAlpha(color, 0.12));
+}
+
+function colorWithAlpha(hex, alpha = 0.12) {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(String(hex || ""));
+  if (!match) return `rgba(36, 107, 85, ${alpha})`;
+  const [, r, g, b] = match;
+  return `rgba(${Number.parseInt(r, 16)}, ${Number.parseInt(g, 16)}, ${Number.parseInt(b, 16)}, ${Math.max(0, Math.min(1, alpha))})`;
+}
+
+function trajectoryGradient(colors = []) {
+  const safeColors = (colors.length ? colors : [sourceColor("custom_audio")]).map((color) => color || sourceColor("custom_audio"));
+  if (safeColors.length === 1) return safeColors[0];
+  const stops = [];
+  const width = 100 / safeColors.length;
+  safeColors.forEach((color, index) => {
+    const start = Math.round(index * width * 10) / 10;
+    const end = Math.round((index + 1) * width * 10) / 10;
+    stops.push(`${color} ${start}%`, `${color} ${end}%`);
+  });
+  return `linear-gradient(90deg, ${stops.join(", ")})`;
+}
+
+function trajectorySnapshotForSource(source = {}, colorKey = "custom_audio", sourceKind = "") {
+  const snapshot = source.trajectory_snapshot && typeof source.trajectory_snapshot === "object"
+    ? clone(source.trajectory_snapshot)
+    : {};
+  if (snapshot.start_distance_cm !== undefined && snapshot.end_distance_cm !== undefined) {
+    return snapshot;
+  }
+  if (sourceKind === "fixed_audio") return {};
+  if (String(source.motion_mode || "").toLowerCase() === "stationary") return {};
+  const controls = state.trajectory_controls || currentTrajectoryControls();
+  return {
+    schema: "pps-stimulus-trajectory.v1",
+    label: source.label || "",
+    source_kind: sourceKind,
+    noise_type: colorKey,
+    start_distance_cm: controls.start_distance_cm,
+    end_distance_cm: controls.end_distance_cm,
+    start_rotation_deg: controls.start_rotation_deg,
+    end_rotation_deg: controls.end_rotation_deg,
+    movement_duration_s: controls.movement_duration_s,
+    start_hold_s: controls.start_hold_s,
+    end_hold_s: controls.end_hold_s,
+    path_length_m: Math.max(0, Math.abs(Number(controls.start_distance_cm || 0) - Number(controls.end_distance_cm || 0)) / 100),
+  };
+}
+
+function readJsonField(field) {
+  if (!field) return {};
+  try {
+    const value = JSON.parse(field.value || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch (_error) {
+    return {};
   }
 }
 
@@ -473,13 +694,17 @@ function normalizeSourceKey(value) {
 function renderSourceCounts() {
   const generated = $("noise-list").querySelectorAll(".noise-source-card").length;
   const audioCards = [...$("audio-list").querySelectorAll(".audio-source-card")];
-  const imported = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value !== "prestimulus").length;
-  const prestimulus = audioCards.filter((card) => card.querySelector('[data-field="audio_role"]')?.value === "prestimulus").length;
+  const snippetCards = [...$("snippet-list").querySelectorAll(".audio-source-card")];
+  const imported = audioCards.length;
+  const prestimulus = snippetCards.length;
   const stimulusSources = generated + imported;
-  const sourceLabel = `${stimulusSources} baked source${stimulusSources === 1 ? "" : "s"}`;
-  const snippetLabel = prestimulus ? ` + ${prestimulus} snippet${prestimulus === 1 ? "" : "s"}` : "";
-  $("source-counts").textContent = `${sourceLabel}${snippetLabel}`;
+  const sourceLabel = `${stimulusSources} local source${stimulusSources === 1 ? "" : "s"}`;
+  $("source-counts").textContent = sourceLabel;
   $("source-counts").className = `status-label ${stimulusSources ? "ready" : "required"}`;
+  if ($("snippet-counts")) {
+    $("snippet-counts").textContent = `${prestimulus} clip${prestimulus === 1 ? "" : "s"}`;
+    $("snippet-counts").className = `status-label ${prestimulus ? "ready" : "required"}`;
+  }
 }
 
 function renderStimulusFeedback() {
@@ -586,13 +811,37 @@ function renderTrials() {
   const protocol = state.design.protocol || {};
   $("repetitions").value = protocol.repetitions_per_condition ?? 1;
   $("blocks").value = protocol.blocks ?? 1;
-  $("catch-percent").value = protocol.catch_trial_percentage ?? 0;
   $("soa-values").value = formatList(protocol.soa_values_ms);
+  $("block-soa-values").value = formatList(protocol.soa_values_ms);
   renderTrialStrips();
+  renderProtocolSummary();
+}
 
+function renderProtocolSummary() {
   const summary = $("protocol-summary");
   summary.innerHTML = "";
-  for (const [key, value] of Object.entries(state.protocol_summary || {})) {
+  const blocks = Math.max(1, Math.round(numberValue("blocks", state.design.protocol?.blocks || 1)));
+  const participants = Math.max(1, Math.round(numberValue("participants", state.design.protocol?.participants || 1)));
+  const composition = blockCompositionEstimate();
+  const totalTrials = composition.totalPerBlock * blocks;
+  const participantMinutes = Math.round((totalTrials * estimatedTrialSeconds() / 60) * 10) / 10;
+  const baselineDenominator = Math.max(1, composition.audioPerBlock + composition.baselinePerBlock);
+  const rows = {
+    audio_tactile_trials: composition.audioPerBlock * blocks,
+    baseline_trials: composition.baselinePerBlock * blocks,
+    catch_trials: composition.catchPerBlock * blocks,
+    total_trials: totalTrials,
+    blocks,
+    trials_per_block: composition.totalPerBlock,
+    min_trials_per_block: composition.totalPerBlock,
+    max_trials_per_block: composition.totalPerBlock,
+    participants,
+    total_participant_trials: totalTrials * participants,
+    baseline_actual_percent: Math.round((1000 * composition.baselinePerBlock / baselineDenominator)) / 10,
+    estimated_participant_minutes: participantMinutes,
+    estimated_all_participants_hours: Math.round((participantMinutes * participants / 60) * 10) / 10,
+  };
+  for (const [key, value] of Object.entries(rows)) {
     const item = document.createElement("div");
     item.className = "summary-item";
     item.innerHTML = `<span>${humanize(key)}</span><strong>${value}</strong>`;
@@ -605,14 +854,39 @@ function renderBaseline() {
   const savedStrategy = protocol.include_baseline_trials === false
     ? "none"
     : (protocol.baseline_strategy || "tactile_only");
-  $("baseline-strategy").value = savedStrategy;
+  $("catch-percent").value = protocol.catch_trial_percentage ?? 0;
   $("baseline-percent").value = savedStrategy === "none" ? 0 : (protocol.baseline_trial_percentage ?? 0);
   $("baseline-soa-values").value = formatList(protocol.baseline_soa_values_ms || []);
+  setBaselineStrategy(savedStrategy);
   updateBaselineDecision();
 }
 
 function currentBaselineStrategy() {
-  return $("baseline-strategy").value || "";
+  return $("baseline-strategy").value || "none";
+}
+
+function baselineOptionInputs() {
+  return [...document.querySelectorAll('input[name="baseline-option"]')];
+}
+
+function setBaselineStrategy(strategy) {
+  const nextStrategy = strategy || "none";
+  $("baseline-strategy").value = nextStrategy;
+  if ($("baseline-strategy").value !== nextStrategy) $("baseline-strategy").value = "none";
+  $("baseline-enabled").checked = nextStrategy !== "none";
+  syncBaselineStrategyControls();
+}
+
+function syncBaselineStrategyControls() {
+  const strategy = $("baseline-strategy").value || "none";
+  $("baseline-strategy").value = strategy;
+  $("baseline-enabled").checked = strategy !== "none";
+  for (const input of baselineOptionInputs()) {
+    input.disabled = false;
+    input.checked = input.value === strategy;
+    input.closest(".baseline-option-card")?.classList.toggle("active", input.checked);
+    input.closest(".baseline-option-card")?.classList.remove("disabled");
+  }
 }
 
 function derivedBaselineTimingsMs(strategy = currentBaselineStrategy()) {
@@ -628,44 +902,165 @@ function derivedBaselineTimingsMs(strategy = currentBaselineStrategy()) {
 }
 
 function eventSequenceAudioCountPerBlock() {
+  return blockCompositionEstimate().audioPerBlock;
+}
+
+function tactileSiteCount() {
+  return Math.max(1, (state.design.protocol?.tactile_sites || ["hand"]).length);
+}
+
+function rowSourceCount(row) {
+  const fallbackSourceCount = Math.max(1, stimulusSourceDetailsFromDom().length);
+  const slot = row.querySelector('.filmstrip-element[data-element-kind="looming_stimulus"]');
+  let selected = 0;
+  if (slot) {
+    const checkboxes = slot.querySelectorAll('input[data-element-field="source_labels"]:checked');
+    const selectedOptions = slot.querySelectorAll('select[data-element-field="source_labels"] option:checked');
+    selected = checkboxes.length || selectedOptions.length;
+  }
+  return Math.max(1, selected || fallbackSourceCount);
+}
+
+function rowAudioCountPerBlock(row) {
   const soaCount = parseIntegerList($("soa-values").value).length;
   const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
-  const fallbackSourceCount = Math.max(1, stimulusSourceDetailsFromDom().length);
-  let total = 0;
-  const rows = [...$("filmstrip-list").querySelectorAll(".filmstrip-row")];
-  if (!rows.length) return fallbackSourceCount * soaCount * repetitions;
-  for (const row of rows) {
-    const slot = row.querySelector('.filmstrip-element[data-element-kind="looming_stimulus"]');
-    const selected = slot ? slot.querySelectorAll('[data-element-field="source_labels"] option:checked').length : 0;
-    total += Math.max(1, selected || fallbackSourceCount) * soaCount * repetitions;
+  return rowSourceCount(row) * Math.max(soaCount, 0) * repetitions * tactileSiteCount();
+}
+
+function defaultRowMix() {
+  const catchPercent = Math.max(0, Math.min(99, numberValue("catch-percent", 0)));
+  const baselinePercent = currentBaselineStrategy() === "none"
+    ? 0
+    : Math.max(0, Math.min(99, numberValue("baseline-percent", 0)));
+  return {
+    audioTactile: Math.max(1, 100 - catchPercent - baselinePercent),
+    catch: catchPercent,
+    baseline: baselinePercent,
+  };
+}
+
+function rowMixFromRow(row) {
+  const defaults = defaultRowMix();
+  const field = (name) => row.querySelector(`[data-strip-field="${name}"]`);
+  const catchValue = field("catch_percentage")?.value;
+  const baselineValue = currentBaselineStrategy() === "none" ? 0 : field("baseline_percentage")?.value;
+  const audioValue = field("audio_tactile_percentage")?.value;
+  const catchPercent = catchValue === undefined || catchValue === ""
+    ? defaults.catch
+    : Math.max(0, Math.min(100, Number(catchValue || 0)));
+  const baselinePercent = baselineValue === undefined || baselineValue === ""
+    ? defaults.baseline
+    : Math.max(0, Math.min(100, Number(baselineValue || 0)));
+  const audioTactilePercent = audioValue === undefined || audioValue === ""
+    ? Math.max(0, 100 - catchPercent - baselinePercent)
+    : Math.max(0, Math.min(100, Number(audioValue || 0)));
+  return {
+    audioTactile: audioTactilePercent,
+    catch: catchPercent,
+    baseline: baselinePercent,
+    total: audioTactilePercent + catchPercent + baselinePercent,
+  };
+}
+
+function applyBaselineDefaultToTrialRows() {
+  const baselinePercent = currentBaselineStrategy() === "none"
+    ? 0
+    : Math.max(0, Math.min(99, numberValue("baseline-percent", 0)));
+  for (const row of $("filmstrip-list").querySelectorAll(".filmstrip-row")) {
+    const catchField = row.querySelector('[data-strip-field="catch_percentage"]');
+    const baselineField = row.querySelector('[data-strip-field="baseline_percentage"]');
+    const audioField = row.querySelector('[data-strip-field="audio_tactile_percentage"]');
+    if (!baselineField || !audioField) continue;
+    const catchPercent = Math.max(0, Math.min(99, Number(catchField?.value || 0)));
+    baselineField.value = String(baselinePercent);
+    audioField.value = String(Math.max(1, 100 - catchPercent - baselinePercent));
   }
-  return total;
+}
+
+function syncRandomizerSoaInputs(sourceInput) {
+  const value = sourceInput?.value ?? $("soa-values").value;
+  $("soa-values").value = value;
+  if ($("block-soa-values") && $("block-soa-values") !== sourceInput) {
+    $("block-soa-values").value = value;
+  }
+}
+
+function rowExtraCount(audioCount, extraPercent, audioPercent) {
+  if (audioCount <= 0 || extraPercent <= 0) return 0;
+  return Math.ceil(audioCount * extraPercent / Math.max(0.1, audioPercent));
+}
+
+function rowCompositionCounts(row) {
+  const audioPerBlock = rowAudioCountPerBlock(row);
+  const mix = rowMixFromRow(row);
+  const catchPerBlock = rowExtraCount(audioPerBlock, mix.catch, mix.audioTactile);
+  const baselinePerBlock = currentBaselineStrategy() === "none"
+    ? 0
+    : rowExtraCount(audioPerBlock, mix.baseline, mix.audioTactile);
+  return {
+    mix,
+    audioPerBlock,
+    catchPerBlock,
+    baselinePerBlock,
+    totalPerBlock: audioPerBlock + catchPerBlock + baselinePerBlock,
+  };
+}
+
+function blockCompositionEstimate() {
+  const rows = [...$("filmstrip-list").querySelectorAll(".filmstrip-row")];
+  if (!rows.length) {
+    const soaCount = parseIntegerList($("soa-values").value).length;
+    const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
+    const audioPerBlock = Math.max(1, stimulusSourceDetailsFromDom().length) * Math.max(soaCount, 0) * repetitions * tactileSiteCount();
+    const mix = defaultRowMix();
+    const catchPerBlock = rowExtraCount(audioPerBlock, mix.catch, mix.audioTactile);
+    const baselinePerBlock = currentBaselineStrategy() === "none"
+      ? 0
+      : rowExtraCount(audioPerBlock, mix.baseline, mix.audioTactile);
+    return {
+      audioPerBlock,
+      catchPerBlock,
+      baselinePerBlock,
+      totalPerBlock: audioPerBlock + catchPerBlock + baselinePerBlock,
+      rows: [],
+    };
+  }
+  const composition = {
+    audioPerBlock: 0,
+    catchPerBlock: 0,
+    baselinePerBlock: 0,
+    totalPerBlock: 0,
+    rows: [],
+  };
+  for (const row of rows) {
+    const rowCounts = rowCompositionCounts(row);
+    composition.audioPerBlock += rowCounts.audioPerBlock;
+    composition.catchPerBlock += rowCounts.catchPerBlock;
+    composition.baselinePerBlock += rowCounts.baselinePerBlock;
+    composition.totalPerBlock += rowCounts.totalPerBlock;
+    composition.rows.push(rowCounts);
+  }
+  return composition;
 }
 
 function baselineCountEstimate() {
   const strategy = currentBaselineStrategy();
   const blocks = Math.max(1, Math.round(numberValue("blocks", 1)));
+  const composition = blockCompositionEstimate();
   if (!strategy || strategy === "none") {
-    return { strategy, timings: [], perBlock: 0, total: 0, actualPercent: 0, audioPerBlock: eventSequenceAudioCountPerBlock() };
+    return { strategy, timings: [], perBlock: 0, total: 0, actualPercent: 0, audioPerBlock: composition.audioPerBlock, composition };
   }
   const timings = derivedBaselineTimingsMs(strategy);
-  const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
-  const tactileSiteCount = Math.max(1, (state.design.protocol?.tactile_sites || ["hand"]).length);
-  const rowCount = Math.max(1, $("filmstrip-list").querySelectorAll(".filmstrip-row").length);
-  const candidates = Math.max(0, rowCount * repetitions * tactileSiteCount * timings.length);
-  const audioCount = Math.max(0, eventSequenceAudioCountPerBlock());
-  const percent = Math.max(0, Math.min(99, numberValue("baseline-percent", 0)));
-  const perBlock = percent > 0 && audioCount > 0
-    ? Math.max(1, Math.ceil(audioCount * percent / (100 - percent)))
-    : candidates;
-  const denominator = Math.max(1, audioCount + perBlock);
+  const perBlock = composition.baselinePerBlock;
+  const denominator = Math.max(1, composition.totalPerBlock);
   return {
     strategy,
     timings,
     perBlock,
     total: perBlock * blocks,
     actualPercent: Math.round((1000 * perBlock / denominator)) / 10,
-    audioPerBlock: audioCount,
+    audioPerBlock: composition.audioPerBlock,
+    composition,
   };
 }
 
@@ -685,44 +1080,13 @@ function estimatedTrialSeconds() {
 }
 
 function updateBaselineDecision() {
+  syncBaselineStrategyControls();
   const strategy = currentBaselineStrategy();
   const status = $("baseline-status");
-  const valid = strategy && (strategy === "none" || numberValue("baseline-percent", 0) > 0);
+  const valid = Boolean(strategy);
   status.textContent = valid ? "ready" : "required";
   status.className = `status-label ${valid ? "ready" : "required"}`;
-
-  const note = BASELINE_STRATEGY_NOTES[strategy] || BASELINE_STRATEGY_NOTES[""];
-  $("baseline-literature").innerHTML = `<strong>${escapeHtml(note.label)}</strong><span>${escapeHtml(note.note)}</span>`;
-
-  const timingField = $("baseline-soa-values");
-  const customTiming = strategy === "custom" || strategy === "tactile_only";
-  timingField.disabled = !customTiming;
-  timingField.closest(".field-row").classList.toggle("muted-control", !customTiming);
   if (strategy === "none") $("baseline-percent").value = 0;
-
-  const estimate = baselineCountEstimate();
-  const summary = $("baseline-summary");
-  const blocks = Math.max(1, Math.round(numberValue("blocks", 1)));
-  const catchPercent = Math.max(0, Math.min(99, numberValue("catch-percent", 0)));
-  const catchPerBlock = estimate.audioPerBlock > 0 && catchPercent > 0
-    ? Math.ceil(estimate.audioPerBlock * catchPercent / (100 - catchPercent))
-    : 0;
-  const liveTrials = (estimate.audioPerBlock + estimate.perBlock + catchPerBlock) * blocks;
-  const participantMinutes = Math.round((liveTrials * estimatedTrialSeconds() / 60) * 10) / 10;
-  summary.innerHTML = "";
-  const rows = {
-    timing_values_ms: estimate.timings.length ? estimate.timings.join(", ") : "none",
-    baseline_trials_per_block: estimate.perBlock,
-    baseline_trials_total: estimate.total,
-    actual_baseline_percent: `${estimate.actualPercent}%`,
-    estimated_participant_minutes: participantMinutes,
-  };
-  for (const [key, value] of Object.entries(rows)) {
-    const item = document.createElement("div");
-    item.className = "summary-item";
-    item.innerHTML = `<span>${humanize(key)}</span><strong>${escapeHtml(String(value))}</strong>`;
-    summary.appendChild(item);
-  }
 }
 
 function renderTrialStrips() {
@@ -731,31 +1095,66 @@ function renderTrialStrips() {
   const strips = state.design.protocol?.trial_strips || [];
   list.innerHTML = "";
   if (!strips.length) {
-    list.innerHTML = `<div class="filmstrip-empty">No event sequences.</div>`;
+    list.innerHTML = `
+      <button type="button" class="trial-row-empty" data-add-empty-row aria-label="Add first trial row">
+        <span>+</span>
+      </button>
+    `;
     return;
   }
   strips.forEach((strip, index) => list.appendChild(renderTrialStripRow(strip, index)));
   updateFilmstripCounts();
 }
 
+function stripMixValues(strip = {}) {
+  const protocol = state.design.protocol || {};
+  const catchPercent = strip.catch_percentage ?? protocol.catch_trial_percentage ?? 0;
+  const baselineFallback = protocol.include_baseline_trials === false
+    ? 0
+    : (protocol.baseline_trial_percentage ?? 0);
+  const baselinePercent = strip.baseline_percentage ?? baselineFallback;
+  const audioTactilePercent = strip.audio_tactile_percentage ?? Math.max(0, 100 - catchPercent - baselinePercent);
+  return {
+    audioTactile: Math.round(Number(audioTactilePercent || 0) * 10) / 10,
+    catch: Math.round(Number(catchPercent || 0) * 10) / 10,
+    baseline: Math.round(Number(baselinePercent || 0) * 10) / 10,
+  };
+}
+
 function renderTrialStripRow(strip, index) {
   const row = document.createElement("div");
+  const mix = stripMixValues(strip);
   row.className = "filmstrip-row";
   row.dataset.stripIndex = String(index);
   row.innerHTML = `
     <div class="filmstrip-row-header">
-      <button type="button" class="filmstrip-preview-button" data-preview-strip="${index}" title="Prelisten event sequence" aria-label="Prelisten event sequence">&#9658;</button>
+      <button type="button" class="filmstrip-preview-button" data-preview-strip="${index}" title="Prelisten trial type" aria-label="Prelisten trial type">&#9658;</button>
+      <div class="trial-row-order">
+        <strong>Row ${index + 1}</strong>
+        <span>${rowOrderText(index)}</span>
+      </div>
       <div class="field-row">
-        <label>Event label</label>
-        <input data-strip-field="label" value="${escapeAttr(strip.label || `Event ${index + 1}`)}">
+        <label>Trial type label</label>
+        <input data-strip-field="label" value="${escapeAttr(strip.label || `Trial type ${index + 1}`)}">
       </div>
       <div class="filmstrip-row-actions">
-        <span class="filmstrip-count" data-strip-count></span>
-        <button type="button" data-strip-move="up">Up</button>
-        <button type="button" data-strip-move="down">Down</button>
-        <button type="button" data-add-strip-element="fixed_audio">Add Clip</button>
-        <button type="button" data-add-strip-element="looming_stimulus">Add Looming Stimulus</button>
-        <button type="button" data-remove-strip>Remove Event</button>
+        <button type="button" class="icon-action" data-strip-move="up" title="Move row up" aria-label="Move row up">^</button>
+        <button type="button" class="icon-action" data-strip-move="down" title="Move row down" aria-label="Move row down">v</button>
+        <button type="button" class="icon-action danger" data-remove-strip title="Remove trial sequence row" aria-label="Remove trial sequence row">x</button>
+      </div>
+    </div>
+    <div class="filmstrip-row-mix state-only" aria-label="Trial type row composition">
+      <div class="field-row">
+        <label>Audio-tactile %</label>
+        <input data-strip-field="audio_tactile_percentage" type="number" min="0" max="100" step="1" value="${escapeAttr(mix.audioTactile)}">
+      </div>
+      <div class="field-row">
+        <label>Catch %</label>
+        <input data-strip-field="catch_percentage" type="number" min="0" max="100" step="1" value="${escapeAttr(mix.catch)}">
+      </div>
+      <div class="field-row">
+        <label>Baseline %</label>
+        <input data-strip-field="baseline_percentage" type="number" min="0" max="100" step="1" value="${escapeAttr(mix.baseline)}">
       </div>
     </div>
     <div class="filmstrip-sequence"></div>
@@ -763,39 +1162,97 @@ function renderTrialStripRow(strip, index) {
   const sequence = row.querySelector(".filmstrip-sequence");
   for (const [elementIndex, element] of (strip.elements || []).entries()) {
     sequence.appendChild(renderTrialStripElement(element, elementIndex));
+    sequence.appendChild(renderAddEventControl(index, elementIndex + 1, strip));
+  }
+  if (!(strip.elements || []).length) {
+    sequence.appendChild(renderAddEventControl(index, 0, strip, true));
   }
   return row;
+}
+
+function rowOrderText(index) {
+  return index === 0 ? "plays first" : `plays after row ${index}`;
 }
 
 function renderTrialStripElement(element, index) {
   const sourceType = element.kind === "fixed_audio" ? "fixed_audio" : "looming_stimulus";
   const card = document.createElement("div");
-  card.className = `filmstrip-element ${sourceType.replace("_", "-")} ${filmstripNoiseClass(element)}`;
+  card.className = `filmstrip-element sequence-event ${sourceType.replace("_", "-")} ${filmstripNoiseClass(element)}`;
   card.dataset.elementIndex = String(index);
   card.dataset.elementKind = sourceType;
-  const title = sourceType === "fixed_audio" ? "Fixed audio clip" : "Looming Stimulus";
-  const sourceControl = sourceType === "fixed_audio"
-    ? `<select data-element-field="source_label">${fixedAudioOptions(element.source_label || "")}</select>`
-    : `<select data-element-field="source_labels" multiple>${loomingSourceOptions(element.source_labels || [])}</select>`;
-  card.innerHTML = `
-    <div class="filmstrip-element-heading">
-      <span>${title}</span>
-      <button type="button" data-remove-strip-element>Remove</button>
-    </div>
-    <div class="field-row">
-      <label>Label</label>
-      <input data-element-field="label" value="${escapeAttr(element.label || title)}">
-    </div>
-    <div class="field-row">
-      <label>Source</label>
-      ${sourceControl}
-    </div>
-    <div class="field-row inline-check">
-      <input data-element-field="randomized" type="checkbox" ${element.randomized ? "checked" : ""}>
-      <label>Randomized</label>
+  card.innerHTML = sourceType === "fixed_audio"
+    ? renderFixedBlock(element)
+    : renderRandomizerBlock(element);
+  return card;
+}
+
+function renderAddEventControl(rowIndex, insertAfter, strip = {}, isEmpty = false) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `sequence-event-add ${isEmpty ? "empty-row-add" : ""}`;
+  const hasRandomizer = (strip.elements || []).some((element) => element.kind === "looming_stimulus");
+  wrapper.innerHTML = `
+    <button type="button" class="sequence-event-add-symbol" title="Add sequence event" aria-label="Add sequence event">+</button>
+    <div class="sequence-event-add-menu" aria-label="Add sequence event type">
+      <button type="button" data-add-strip-element="fixed_audio" data-insert-after="${insertAfter}">Fixed</button>
+      <button type="button" data-add-strip-element="looming_stimulus" data-insert-after="${insertAfter}" ${hasRandomizer ? "disabled title=\"One randomizer event per row is supported for now.\"" : ""}>Randomizer</button>
     </div>
   `;
-  return card;
+  return wrapper;
+}
+
+function renderFixedBlock(element) {
+  const title = "Fixed event";
+  return `
+    <div class="filmstrip-element-heading">
+      <span>${title}</span>
+      <button type="button" class="icon-action danger" data-remove-strip-element title="Remove event" aria-label="Remove event">x</button>
+    </div>
+    <div class="field-row">
+      <label>Clip</label>
+      <select data-element-field="source_label">${fixedAudioOptions(element.source_label || "")}</select>
+    </div>
+    <input data-element-field="label" type="hidden" value="${escapeAttr(element.label || element.source_label || title)}">
+    <div class="sequence-event-note">Always plays this clip at this position.</div>
+  `;
+}
+
+function renderRandomizerBlock(element) {
+  const title = "Randomizer event";
+  const selected = normalizedRandomizerSelection(element);
+  return `
+    <div class="filmstrip-element-heading">
+      <span>${title}</span>
+      <button type="button" class="icon-action danger" data-remove-strip-element title="Remove event" aria-label="Remove event">x</button>
+    </div>
+    <div class="sequence-event-note">Randomizes across the selected stimulus sources at this point in the sequence.</div>
+    <div class="randomizer-source-list" data-randomizer-source-list>
+      ${randomizerSourceRows(selected)}
+    </div>
+    <input data-element-field="label" type="hidden" value="${escapeAttr(element.label || "Randomizer event")}">
+    <input data-element-field="randomized" type="hidden" value="true">
+  `;
+}
+
+function normalizedRandomizerSelection(element = {}) {
+  const allLabels = stimulusSourceDetailsFromDom().map((item) => item.label);
+  const saved = (element.source_labels || []).filter(Boolean);
+  return new Set(saved.length ? saved : allLabels);
+}
+
+function randomizerSourceRows(selectedSet) {
+  const sources = stimulusSourceDetailsFromDom();
+  if (!sources.length) {
+    return `<div class="randomizer-empty">Bake or import a stimulus source first.</div>`;
+  }
+  const rows = sources.map((source) => `
+    <label class="randomizer-source-row ${source.noise_type ? `noise-${escapeAttr(String(source.noise_type).toLowerCase())}` : ""}">
+      <span>
+        <input data-element-field="source_labels" type="checkbox" value="${escapeAttr(source.label)}" ${selectedSet.has(source.label) ? "checked" : ""}>
+        ${escapeHtml(source.label)}
+      </span>
+    </label>
+  `);
+  return rows.join("");
 }
 
 function filmstripNoiseClass(element) {
@@ -820,7 +1277,7 @@ function loomingSourceOptions(selected = []) {
 
 function fixedAudioSourceOptions() {
   const options = [];
-  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+  for (const card of $("snippet-list").querySelectorAll(".audio-source-card")) {
     const role = card.querySelector('[data-field="audio_role"]')?.value;
     if (role !== "prestimulus") continue;
     const label = card.querySelector('[data-field="label"]')?.value.trim();
@@ -842,7 +1299,7 @@ function stimulusSourceDetailsFromDom() {
     const role = card.querySelector('[data-field="audio_role"]')?.value;
     if (role === "prestimulus") continue;
     const label = card.querySelector('[data-field="label"]')?.value.trim() || audioRoleTitle(role);
-    sources.push({ label, noise_type: "custom_audio" });
+    sources.push({ label, noise_type: card.querySelector('[data-field="tone_type"]')?.value || "custom_audio" });
   }
   return sources;
 }
@@ -850,7 +1307,7 @@ function stimulusSourceDetailsFromDom() {
 function collectTrialStrips() {
   const strips = [];
   for (const [stripIndex, row] of [...$("filmstrip-list").querySelectorAll(".filmstrip-row")].entries()) {
-    const label = row.querySelector('[data-strip-field="label"]')?.value.trim() || `Row ${stripIndex + 1}`;
+    const label = row.querySelector('[data-strip-field="label"]')?.value.trim() || `Trial type ${stripIndex + 1}`;
     const elements = [];
     for (const [elementIndex, card] of [...row.querySelectorAll(".filmstrip-element")].entries()) {
       const kind = card.dataset.elementKind === "fixed_audio" ? "fixed_audio" : "looming_stimulus";
@@ -864,14 +1321,21 @@ function collectTrialStrips() {
       };
       if (kind === "fixed_audio") {
         item.source_label = card.querySelector('[data-element-field="source_label"]')?.value || "";
+        item.label = item.source_label || item.label;
       } else {
-        item.source_labels = [...card.querySelectorAll('[data-element-field="source_labels"] option:checked')].map((option) => option.value);
+        const checked = [...card.querySelectorAll('input[data-element-field="source_labels"]:checked')].map((input) => input.value);
+        const selected = [...card.querySelectorAll('select[data-element-field="source_labels"] option:checked')].map((option) => option.value);
+        item.source_labels = checked.length ? checked : selected;
+        item.randomized = true;
       }
       elements.push(item);
     }
     strips.push({
       strip_id: `strip-${stripIndex + 1}`,
       label,
+      audio_tactile_percentage: Number(row.querySelector('[data-strip-field="audio_tactile_percentage"]')?.value || 0),
+      catch_percentage: Number(row.querySelector('[data-strip-field="catch_percentage"]')?.value || 0),
+      baseline_percentage: Number(row.querySelector('[data-strip-field="baseline_percentage"]')?.value || 0),
       elements,
     });
   }
@@ -879,17 +1343,17 @@ function collectTrialStrips() {
 }
 
 function updateFilmstripCounts() {
-  const soaCount = parseIntegerList($("soa-values").value).length;
-  const repetitions = Math.max(1, Math.round(numberValue("repetitions", 1)));
   for (const row of $("filmstrip-list").querySelectorAll(".filmstrip-row")) {
-    const count = row.querySelector("[data-strip-count]");
-    const slot = row.querySelector('.filmstrip-element[data-element-kind="looming_stimulus"]');
-    const selected = slot ? slot.querySelectorAll('[data-element-field="source_labels"] option:checked').length : 0;
-    const sourceCount = selected || stimulusSourceDetailsFromDom().length;
-    const total = sourceCount * Math.max(soaCount, 0) * repetitions;
-    count.textContent = `${sourceCount} stimuli x ${soaCount} SOAs x ${repetitions} reps = ${total} events/block`;
+    const rowCounts = rowCompositionCounts(row);
+    const mixValid = Math.abs(rowCounts.mix.total - 100) <= 0.5 && rowCounts.mix.audioTactile > 0;
+    row.classList.toggle("mix-warning", !mixValid);
   }
+  renderProtocolSummary();
   updateBaselineDecision();
+}
+
+function updateRandomizerBlockCounts(row, rowCounts, soaCount, repetitions) {
+  renderProtocolSummary();
 }
 
 async function previewFilmstripRow(button) {
@@ -937,8 +1401,16 @@ function addFilmstripRow() {
   const strips = collectTrialStrips();
   strips.push({
     strip_id: `strip-${strips.length + 1}`,
-    label: `Event ${strips.length + 1}`,
-    elements: [defaultFilmstripElement("looming_stimulus")],
+    label: `Trial type ${strips.length + 1}`,
+    ...(() => {
+      const mix = defaultRowMix();
+      return {
+        audio_tactile_percentage: mix.audioTactile,
+        catch_percentage: mix.catch,
+        baseline_percentage: mix.baseline,
+      };
+    })(),
+    elements: [],
   });
   setTrialStrips(strips);
 }
@@ -958,9 +1430,9 @@ function defaultFilmstripElement(kind) {
   return {
     element_id: "",
     kind: "looming_stimulus",
-    label: "Looming Stimulus",
+    label: "Randomizer event",
     source_label: "",
-    source_labels: [],
+    source_labels: stimulusSourceDetailsFromDom().map((item) => item.label),
     randomized: true,
   };
 }
@@ -970,7 +1442,13 @@ function addFilmstripElement(button, kind) {
   const stripIndex = Number(row?.dataset.stripIndex || -1);
   const strips = collectTrialStrips();
   if (!strips[stripIndex]) return;
-  strips[stripIndex].elements.push(defaultFilmstripElement(kind));
+  if (kind === "looming_stimulus" && strips[stripIndex].elements.some((element) => element.kind === "looming_stimulus")) {
+    showToast("One randomizer event per row is supported for now.");
+    return;
+  }
+  const insertAfter = Number(button.dataset.insertAfter ?? strips[stripIndex].elements.length);
+  const index = Math.max(0, Math.min(strips[stripIndex].elements.length, insertAfter));
+  strips[stripIndex].elements.splice(index, 0, defaultFilmstripElement(kind));
   setTrialStrips(strips);
 }
 
@@ -1015,7 +1493,17 @@ function syncFilmstripSourceOptions() {
     const selected = [...select.selectedOptions].map((option) => option.value);
     select.innerHTML = loomingSourceOptions(selected);
   }
+  syncRandomizerSourceLists();
   updateFilmstripCounts();
+}
+
+function syncRandomizerSourceLists() {
+  for (const block of document.querySelectorAll('.filmstrip-element[data-element-kind="looming_stimulus"]')) {
+    const selected = new Set([...block.querySelectorAll('input[data-element-field="source_labels"]:checked')].map((input) => input.value));
+    const fallback = selected.size ? selected : normalizedRandomizerSelection({ source_labels: [] });
+    const list = block.querySelector("[data-randomizer-source-list]");
+    if (list) list.innerHTML = randomizerSourceRows(fallback);
+  }
 }
 
 function renderRun() {
@@ -1039,6 +1527,7 @@ function renderRun() {
     .map(([label, ok]) => `<div class="status-row"><strong>${label}</strong><span>${ok ? "ready" : "required"}</span></div>`)
     .join("");
   $("focus-action").disabled = !state.session;
+  renderProtocolSummary();
 }
 
 function renderWorkflow() {
@@ -1134,7 +1623,7 @@ function renderReview() {
 function renderPreviewTables() {
   const trialRows = state.trial_preview || [];
   $("trial-count").textContent = `${trialRows.length} shown`;
-  fillTable("trial-table", trialRows, ["block", "trial", "type", "phase", "soa_ms", "space_cm", "tactile_site", "sequence"]);
+  fillTable("trial-table", trialRows, ["block", "trial", "type", "trial_type", "soa_ms", "space_cm", "tactile_site", "sequence"]);
 
   const orderRows = state.participant_orders || [];
   $("order-count").textContent = `${orderRows.length} shown`;
@@ -1166,6 +1655,7 @@ function renderJob(job) {
 
 function collectPayload() {
   const design = clone(state.design);
+  const trajectoryControls = currentTrajectoryControls();
   design.name = $("design-name").value.trim() || "Untitled PPS design";
   design.noises = collectNoises();
   const audio = collectAudioFiles();
@@ -1174,7 +1664,7 @@ function collectPayload() {
   const trialStrips = collectTrialStrips();
   const legacySpatial = design.protocol?.spatial_values_cm?.length
     ? design.protocol.spatial_values_cm
-    : [numberValue("end-distance", 10)];
+    : [trajectoryControls.end_distance_cm];
   const baselineStrategy = currentBaselineStrategy();
   const baselineTimings = baselineStrategy === "tactile_only" || baselineStrategy === "custom"
     ? parseIntegerList($("baseline-soa-values").value)
@@ -1182,7 +1672,7 @@ function collectPayload() {
   design.protocol = {
     ...(design.protocol || {}),
     repetitions_per_condition: Math.max(1, Math.round(numberValue("repetitions", 1))),
-    soa_values_ms: parseIntegerList($("soa-values").value),
+    soa_values_ms: parseIntegerList($("block-soa-values").value || $("soa-values").value),
     spatial_values_cm: legacySpatial,
     pair_spatial_values_with_soas: false,
     catch_trial_percentage: numberValue("catch-percent", 0),
@@ -1197,15 +1687,7 @@ function collectPayload() {
   return {
     participant_id: $("participant-id").value.trim() || (state.custom_workflow?.is_custom ? "" : "P001"),
     design,
-    trajectory_controls: {
-      start_distance_cm: numberValue("start-distance", 110),
-      end_distance_cm: numberValue("end-distance", 10),
-      start_rotation_deg: numberValue("start-rotation", 0),
-      end_rotation_deg: numberValue("end-rotation", 0),
-      movement_duration_s: numberValue("movement-duration", 3),
-      start_hold_s: numberValue("start-hold", 0.5),
-      end_hold_s: numberValue("end-hold", 0.5)
-    }
+    trajectory_controls: trajectoryControls
   };
 }
 
@@ -1217,14 +1699,20 @@ function collectNoises() {
       noise_type: field("noise_type").value,
       azimuth_deg: Number(field("azimuth_deg").value || 0),
       elevation_deg: Number(field("elevation_deg").value || 0),
-      gain: Number(field("gain").value || 1)
+      gain: Number(field("gain").value || 1),
+      prebaked_path: field("prebaked_path")?.value.trim() || "",
+      trajectory_snapshot: readJsonField(field("trajectory_snapshot"))
     };
   });
 }
 
 function collectAudioFiles() {
   const result = { looming: [], prestimulus: [] };
-  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+  const cards = [
+    ...$("audio-list").querySelectorAll(".audio-source-card"),
+    ...$("snippet-list").querySelectorAll(".audio-source-card"),
+  ];
+  for (const card of cards) {
     const field = (name) => card.querySelector(`[data-field="${name}"]`);
     const role = field("audio_role").value;
     const item = {
@@ -1232,11 +1720,14 @@ function collectAudioFiles() {
       path: field("path").value.trim(),
       target_duration_s: Number(field("target_duration_s").value || 4),
       render_mode: role === "spatialize" ? "spatialize" : "preserve",
+      tone_type: field("tone_type")?.value.trim() || "",
       gain: Number(field("gain").value || 1),
       placement: normalizeSnippetPlacement(field("placement")?.value),
       target_source_label: field("target_source_label")?.value.trim() || "",
       phase: field("phase")?.value.trim() || "",
-      gap_s: Math.max(0, Number(field("gap_s")?.value || 0))
+      gap_s: Math.max(0, Number(field("gap_s")?.value || 0)),
+      motion_mode: field("motion_mode")?.value || (role === "prestimulus" ? "stationary" : "looming"),
+      trajectory_snapshot: readJsonField(field("trajectory_snapshot"))
     };
     if (role === "prestimulus") {
       result.prestimulus.push(item);
@@ -1406,9 +1897,9 @@ function currentTrajectoryControls() {
     end_distance_cm: clampNumber(numberValue("end-distance", 10), 1, 1000, 10),
     start_rotation_deg: normalizeRotationDeg(numberValue("start-rotation", 0)),
     end_rotation_deg: normalizeRotationDeg(numberValue("end-rotation", 0)),
-    movement_duration_s: Math.max(0.1, numberValue("movement-duration", 3)),
-    start_hold_s: Math.max(0, numberValue("start-hold", 0.5)),
-    end_hold_s: Math.max(0, numberValue("end-hold", 0.5))
+    movement_duration_s: clampNumber(numberValue("movement-duration", 3), 0.1, 30, 3),
+    start_hold_s: clampNumber(numberValue("start-hold", 0.5), 0, 30, 0.5),
+    end_hold_s: clampNumber(numberValue("end-hold", 0.5), 0, 30, 0.5)
   };
 }
 
@@ -1417,7 +1908,9 @@ function trajectoryPayloadFromControls() {
   const start = pointFromDistanceRotation(controls.start_distance_cm, controls.start_rotation_deg);
   const end = pointFromDistanceRotation(controls.end_distance_cm, controls.end_rotation_deg);
   const pathLength = distance3d(start, end);
-  const radius = Math.max(0.1, controls.start_distance_cm / 100, controls.end_distance_cm / 100);
+  const sourceTrajectories = sourceTrajectoriesFromDom();
+  const sourceRadius = maxSourceTrajectoryRadius(sourceTrajectories);
+  const radius = Math.max(0.1, controls.start_distance_cm / 100, controls.end_distance_cm / 100, sourceRadius);
   return {
     ...clone(state.viewer_payload || {}),
     preview_mode: $("preview-mode").value || "2d",
@@ -1426,8 +1919,71 @@ function trajectoryPayloadFromControls() {
     movement_duration_s: controls.movement_duration_s,
     start,
     end,
-    controls
+    controls,
+    source_trajectories: sourceTrajectories
   };
+}
+
+function sourceTrajectoriesFromDom() {
+  const rows = [];
+  for (const card of $("noise-list").querySelectorAll(".noise-source-card")) {
+    const field = (name) => card.querySelector(`[data-field="${name}"]`);
+    const label = field("label")?.value.trim() || "Generated noise";
+    const toneType = field("noise_type")?.value || "pink";
+    const snapshot = readJsonField(field("trajectory_snapshot"));
+    const row = sourceTrajectoryRow({
+      label,
+      sourceKind: "generated_noise",
+      toneType,
+      localPath: field("prebaked_path")?.value || "",
+      snapshot
+    });
+    if (row) rows.push(row);
+  }
+  for (const card of $("audio-list").querySelectorAll(".audio-source-card")) {
+    const field = (name) => card.querySelector(`[data-field="${name}"]`);
+    const role = field("audio_role")?.value || "preserve";
+    if (role === "prestimulus") continue;
+    const label = field("label")?.value.trim() || audioRoleTitle(role);
+    const toneType = field("tone_type")?.value || "custom_audio";
+    const row = sourceTrajectoryRow({
+      label,
+      sourceKind: "imported_audio",
+      toneType,
+      localPath: field("path")?.value || "",
+      snapshot: readJsonField(field("trajectory_snapshot"))
+    });
+    if (row) rows.push(row);
+  }
+  return rows.length ? rows : clone(state.viewer_payload?.source_trajectories || []);
+}
+
+function sourceTrajectoryRow({ label, sourceKind, toneType, localPath, snapshot }) {
+  if (!snapshot || !snapshot.start || !snapshot.end) return null;
+  return {
+    label,
+    source_kind: sourceKind,
+    tone_type: toneType,
+    color_hex: sourceColor(toneType),
+    local_path: localPath,
+    trajectory_snapshot: snapshot,
+    start: snapshot.start,
+    end: snapshot.end,
+    path_length_m: snapshot.path_length_m,
+    movement_duration_s: snapshot.movement_duration_s
+  };
+}
+
+function maxSourceTrajectoryRadius(rows = []) {
+  let radius = 0;
+  for (const row of rows) {
+    for (const point of [row.start, row.end]) {
+      if (!point) continue;
+      const value = Math.sqrt(Number(point.x_m || 0) ** 2 + Number(point.y_m || 0) ** 2 + Number(point.z_m || 0) ** 2);
+      if (Number.isFinite(value)) radius = Math.max(radius, value);
+    }
+  }
+  return radius;
 }
 
 function pointFromDistanceRotation(distanceCm, rotationDeg) {
@@ -1706,7 +2262,7 @@ function stageImportedAudioForBake(audio, renderMode) {
   pendingBakeRecipe = {
     kind: "imported_audio",
     render_mode: mode,
-    label: audio.label || (mode === "spatialize" ? "Dry custom tone" : "Already looming / control"),
+    label: audio.label || audioRoleTitle(mode),
     audio,
     gain: Number(audio.gain || 1)
   };
@@ -1751,9 +2307,9 @@ function noiseTypeLabel(noiseType) {
 }
 
 function audioRoleTitle(role) {
-  if (role === "spatialize") return "Dry custom tone";
-  if (role === "prestimulus") return "Instruction snippet";
-  return "Already looming / control";
+  if (role === "spatialize") return "Custom looming tone";
+  if (role === "prestimulus") return "Custom clip";
+  return "Custom audio clip";
 }
 
 function openAudioPicker(renderMode) {
@@ -1774,6 +2330,7 @@ async function importAudioFromPicker() {
       content_base64: contentBase64,
       use: pendingAudioImportMode === "prestimulus" ? "prestimulus" : "looming",
       render_mode: pendingAudioImportMode === "spatialize" ? "spatialize" : "preserve",
+      motion_mode: pendingAudioImportMode === "preserve" || pendingAudioImportMode === "prestimulus" ? "stationary" : "looming",
       placement: "before",
       target_source_label: "",
       phase: "",
@@ -1787,7 +2344,24 @@ async function importAudioFromPicker() {
     refreshAssemblyTargetOptions();
     syncFilmstripSourceOptions();
     renderSourceCounts();
-    showToast("Instruction snippet imported locally");
+    showToast("Custom clip imported locally");
+  } else if (pendingAudioImportMode === "preserve") {
+    state.design.custom_looming_files = state.design.custom_looming_files || [];
+    state.design.custom_looming_files.push({
+      ...imported.audio,
+      render_mode: "preserve",
+      motion_mode: "stationary",
+      tone_type: imported.audio.tone_type || "custom_audio",
+      trajectory_snapshot: {}
+    });
+    pendingBakeRecipe = null;
+    renderBakePanel();
+    renderAudioTable();
+    refreshAssemblyTargetOptions();
+    syncFilmstripSourceOptions();
+    renderSourceCounts();
+    updateViewer();
+    showToast("Custom audio clip imported locally");
   } else {
     stageImportedAudioForBake(imported.audio, pendingAudioImportMode);
     showToast("Audio staged for baking");
@@ -1881,14 +2455,49 @@ function wireEvents() {
   });
   $("import-audio-spatialize").addEventListener("click", () => openAudioPicker("spatialize"));
   $("import-audio-preserve").addEventListener("click", () => openAudioPicker("preserve"));
-  $("import-audio-prestimulus").addEventListener("click", () => openAudioPicker("prestimulus"));
+  $("import-audio-prestimulus")?.addEventListener("click", () => openAudioPicker("prestimulus"));
   $("audio-file-input").addEventListener("change", () => importAudioFromPicker().catch(reportError));
   $("add-strip-row").addEventListener("click", () => addFilmstripRow());
   $("soa-values").addEventListener("input", updateFilmstripCounts);
+  $("block-soa-values").addEventListener("input", () => {
+    syncRandomizerSoaInputs($("block-soa-values"));
+    updateFilmstripCounts();
+  });
   $("repetitions").addEventListener("input", updateFilmstripCounts);
-  $("blocks").addEventListener("input", updateBaselineDecision);
-  $("baseline-strategy").addEventListener("change", updateBaselineDecision);
-  $("baseline-percent").addEventListener("input", updateBaselineDecision);
+  $("blocks").addEventListener("input", updateFilmstripCounts);
+  $("participants").addEventListener("input", renderProtocolSummary);
+  $("catch-percent").addEventListener("input", updateFilmstripCounts);
+  $("baseline-enabled").addEventListener("change", () => {
+    const previous = $("baseline-strategy").value;
+    const nextStrategy = $("baseline-enabled").checked
+      ? (previous && previous !== "none" ? previous : "tactile_only")
+      : "none";
+    setBaselineStrategy(nextStrategy);
+    if (nextStrategy === "none") applyBaselineDefaultToTrialRows();
+    updateFilmstripCounts();
+  });
+  $("baseline-strategy").addEventListener("change", () => {
+    const nextStrategy = $("baseline-strategy").value || "none";
+    setBaselineStrategy(nextStrategy);
+    if (nextStrategy === "none") applyBaselineDefaultToTrialRows();
+    updateFilmstripCounts();
+  });
+  for (const input of baselineOptionInputs()) {
+    input.addEventListener("change", () => {
+      if (!input.checked) {
+        setBaselineStrategy(currentBaselineStrategy());
+        return;
+      }
+      const nextStrategy = input.value || "none";
+      setBaselineStrategy(nextStrategy);
+      if (nextStrategy === "none") applyBaselineDefaultToTrialRows();
+      updateFilmstripCounts();
+    });
+  }
+  $("baseline-percent").addEventListener("input", () => {
+    applyBaselineDefaultToTrialRows();
+    updateFilmstripCounts();
+  });
   $("baseline-soa-values").addEventListener("input", updateBaselineDecision);
   $("reset-camera").addEventListener("click", () => {
     callTrajectoryViewer("resetTrajectoryCamera");
@@ -1938,6 +2547,10 @@ function wireEvents() {
       previewFilmstripRow(previewButton).catch(reportError);
       return;
     }
+    if (event.target.matches("[data-add-empty-row]") || event.target.closest?.("[data-add-empty-row]")) {
+      addFilmstripRow();
+      return;
+    }
     if (event.target.matches("[data-open-folder]")) {
       openLocalFolder(event.target.dataset.openFolder).catch(reportError);
       return;
@@ -1963,6 +2576,7 @@ function wireEvents() {
     if (card && event.target.matches('[data-field="label"]')) {
       refreshAssemblyTargetOptions();
       syncFilmstripSourceOptions();
+      updateViewer();
     }
     if (event.target.closest?.(".filmstrip-row")) {
       state.design.protocol.trial_strips = collectTrialStrips();
@@ -1975,15 +2589,29 @@ function wireEvents() {
       const title = card?.querySelector(".source-card-heading strong");
       if (card) card.dataset.audioRole = event.target.value;
       if (title) title.textContent = audioRoleTitle(event.target.value);
+      const motionField = card?.querySelector('[data-field="motion_mode"]');
+      if (motionField) {
+        motionField.value = event.target.value === "preserve" || event.target.value === "prestimulus" ? "stationary" : "looming";
+      }
+      applySourceCardColor(card, event.target.value === "prestimulus" ? "prestimulus" : card?.querySelector('[data-field="tone_type"]')?.value || "custom_audio");
       refreshAssemblyTargetOptions();
       syncFilmstripSourceOptions();
       renderSourceCounts();
+      updateViewer();
+    }
+    if (event.target.matches('.audio-source-card [data-field="tone_type"]')) {
+      const card = event.target.closest(".audio-source-card");
+      applySourceCardColor(card, event.target.value);
+      syncFilmstripSourceOptions();
+      updateViewer();
     }
     if (event.target.matches('.noise-source-card [data-field="noise_type"]')) {
       const card = event.target.closest(".noise-source-card");
       const title = card?.querySelector(".source-card-heading strong");
       if (title) title.textContent = `${noiseTypeLabel(event.target.value)} noise`;
+      applySourceCardColor(card, event.target.value);
       syncFilmstripSourceOptions();
+      updateViewer();
     }
     if (event.target.closest?.(".filmstrip-row")) {
       state.design.protocol.trial_strips = collectTrialStrips();

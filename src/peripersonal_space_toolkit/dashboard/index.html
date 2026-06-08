@@ -17,10 +17,11 @@
       <nav aria-label="Dashboard sections">
         <a href="#study" data-step-link="study"><span>1 Profile</span><strong data-step-state="study">1</strong></a>
         <a href="#stimulus" data-step-link="stimulus"><span>2 Stimuli</span><strong data-step-state="stimulus">2</strong></a>
-        <a href="#trials" data-step-link="trials"><span>3 Trials</span><strong data-step-state="trials">3</strong></a>
-        <a href="#baseline" data-step-link="baseline"><span>4 Baseline</span><strong data-step-state="baseline">4</strong></a>
-        <a href="#run" data-step-link="run"><span>5 Run Setup</span><strong data-step-state="run">5</strong></a>
-        <a href="#review" data-step-link="review"><span>6 Review</span><strong data-step-state="review">6</strong></a>
+        <a href="#baseline" data-step-link="baseline"><span>3 Baseline</span><strong data-step-state="baseline">3</strong></a>
+        <a href="#trials" data-step-link="trials"><span>4 Sequence</span><strong data-step-state="trials">4</strong></a>
+        <a href="#block" data-step-link="block"><span>5 Blocks</span><strong data-step-state="block">5</strong></a>
+        <a href="#run" data-step-link="run"><span>6 Run Setup</span><strong data-step-state="run">6</strong></a>
+        <a href="#review" data-step-link="review"><span>7 Review</span><strong data-step-state="review">7</strong></a>
       </nav>
       <div class="companion-panel" aria-label="Local companion backend">
         <div class="layout-title">Local Companion</div>
@@ -65,6 +66,7 @@
               <select id="template-select"></select>
             </div>
             <div id="profile-summary" class="summary-text"></div>
+            <div id="profile-recreation-notice" class="profile-notice" hidden></div>
             <div class="field-row">
               <label for="design-name">Design name</label>
               <input id="design-name" type="text" autocomplete="off">
@@ -125,27 +127,23 @@
 
             <div class="source-module" aria-label="Stimulus source selection">
               <div class="source-module-heading">
-                <span>Stimulus Selection</span>
+                <span>Stimulus Type Selection</span>
                 <span id="source-counts" class="status-label">0 sources</span>
               </div>
               <div class="source-action-grid">
                 <div class="source-action source-picker-card">
-                  <label for="generated-noise-select">Generated noise</label>
+                  <label for="generated-noise-select">Generate Looming Noise</label>
                   <select id="generated-noise-select">
-                    <option value="">Choose noise to bake...</option>
+                    <option value="">Choose noise type to bake...</option>
                   </select>
                 </div>
                 <button id="import-audio-spatialize" type="button" class="source-action">
-                  <strong>Dry Custom Tone</strong>
-                  <span>Make looming with trajectory</span>
+                  <strong>Custom Looming Tone</strong>
+                  <span>Make clip looming with selected trajectory</span>
                 </button>
                 <button id="import-audio-preserve" type="button" class="source-action">
-                  <strong>Already Looming / Control</strong>
-                  <span>Preserve local audio</span>
-                </button>
-                <button id="import-audio-prestimulus" type="button" class="source-action">
-                  <strong>Instruction Snippet</strong>
-                  <span>Attach before/after stimulus</span>
+                  <strong>Custom Audio Clip</strong>
+                  <span>Preserve clip as-is for later trial use</span>
                 </button>
               </div>
               <div class="bake-panel">
@@ -168,12 +166,11 @@
             <div class="source-card-list" id="noise-list"></div>
 
             <div class="table-toolbar">
-              <span>Baked local stimuli and instruction snippets</span>
+              <span>Local stimulus clips</span>
             </div>
-            <input id="audio-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/mpeg,audio/mp3" hidden>
             <div class="source-card-list" id="audio-list"></div>
             <div class="step-footer">
-              <button type="button" class="primary" data-continue-step="stimulus">Continue To Trials</button>
+              <button type="button" class="primary" data-continue-step="stimulus">Continue To Baseline</button>
             </div>
           </section>
           </div>
@@ -196,7 +193,7 @@
                 <button id="reset-camera" type="button">Reset Camera</button>
               </div>
             </div>
-            <iframe id="trajectory-frame" title="Trajectory preview" src="../viewer/index.html?v=stable-zoom-2d-view"></iframe>
+            <iframe id="trajectory-frame" title="Trajectory preview" src="../viewer/index.html?v=source-trajectory-inventory"></iframe>
           </section>
 
             <section id="stimulus-feedback" class="panel" data-step-panel="stimulus" data-resizable-panel data-panel-id="stimulus-feedback">
@@ -211,14 +208,110 @@
         </section>
       </section>
 
-      <section class="decision-segment" aria-labelledby="trials-segment-title">
+      <section class="decision-segment" aria-labelledby="baseline-segment-title">
         <div class="segment-heading">
           <span class="segment-kicker">Segment 3</span>
-          <h2 id="trials-segment-title">Trial Designer</h2>
+          <h2 id="baseline-segment-title">Baseline Strategy</h2>
+        </div>
+        <section id="baseline" class="panel" data-step-panel="baseline" data-resizable-panel data-panel-id="baseline">
+          <div class="panel-heading">
+            <div class="panel-title">Baseline Trial Design <span class="step-badge" data-step-badge="baseline"></span></div>
+            <span id="baseline-status" class="status-label">checking</span>
+          </div>
+          <div class="baseline-state-fields" aria-hidden="true">
+            <input id="baseline-enabled" class="state-only" type="checkbox" tabindex="-1">
+            <input id="baseline-percent" type="hidden">
+            <input id="catch-percent" type="hidden">
+            <input id="baseline-soa-values" type="hidden" autocomplete="off">
+            <select id="baseline-strategy" class="state-only" aria-hidden="true" tabindex="-1">
+              <option value="none">No baseline trials</option>
+              <option value="tactile_only">Matched SOA anchors</option>
+              <option value="soa_zero">Sound onset / min SOA</option>
+              <option value="sound_offset">Sound offset / max SOA</option>
+              <option value="custom">Custom timing anchors</option>
+            </select>
+          </div>
+          <fieldset id="baseline-options" class="baseline-option-grid baseline-strategy-only" aria-label="Baseline strategy">
+            <label class="baseline-option-card" data-baseline-option="none">
+              <input type="checkbox" name="baseline-option" value="none">
+              <span class="baseline-option-title">No baseline trials</span>
+              <span class="baseline-option-copy">Use only the audio-tactile and catch rows defined later in the block-design step.</span>
+              <em>No tactile-only anchors</em>
+            </label>
+            <label class="baseline-option-card" data-baseline-option="tactile_only">
+              <input type="checkbox" name="baseline-option" value="tactile_only">
+              <span class="baseline-option-title">Matched SOA anchors</span>
+              <span class="baseline-option-copy">Tactile-only rows use the same timing anchors as the SOA values in the randomizer.</span>
+              <em>Paper-style full timing baseline</em>
+            </label>
+            <label class="baseline-option-card" data-baseline-option="soa_zero">
+              <input type="checkbox" name="baseline-option" value="soa_zero">
+              <span class="baseline-option-title">Sound onset / min SOA</span>
+              <span class="baseline-option-copy">Uses the earliest/synchronous tactile anchor at auditory onset.</span>
+              <em>Synchronous timing control</em>
+            </label>
+            <label class="baseline-option-card" data-baseline-option="sound_offset">
+              <input type="checkbox" name="baseline-option" value="sound_offset">
+              <span class="baseline-option-title">Sound offset / max SOA</span>
+              <span class="baseline-option-copy">Uses the late tactile anchor at the end of the selected sound window.</span>
+              <em>Late/end-anchor control</em>
+            </label>
+            <label class="baseline-option-card" data-baseline-option="custom">
+              <input type="checkbox" name="baseline-option" value="custom">
+              <span class="baseline-option-title">Custom timing anchors</span>
+              <span class="baseline-option-copy">Use profile-specific tactile-only timing anchors carried by the design/template.</span>
+              <em>Profile-defined anchors</em>
+            </label>
+          </fieldset>
+          <div class="step-footer">
+            <button type="button" class="primary" data-continue-step="baseline">Continue To Trial Sequence</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="decision-segment" aria-labelledby="trials-segment-title">
+        <div class="segment-heading">
+          <span class="segment-kicker">Segment 4</span>
+          <h2 id="trials-segment-title">Trial Sequence Design</h2>
         </div>
         <section id="trials" class="panel" data-step-panel="trials" data-resizable-panel data-panel-id="trials">
           <div class="panel-heading">
-            <div class="panel-title">Within-Block Event Assembly <span class="step-badge" data-step-badge="trials"></span></div>
+            <div class="panel-title">Single-Trial Sequence Assembly <span class="step-badge" data-step-badge="trials"></span></div>
+          </div>
+          <div class="trial-sequence-state-fields" aria-hidden="true">
+            <input id="soa-values" type="hidden">
+          </div>
+          <div class="trial-snippet-module" aria-label="Custom clip source imports">
+            <div class="source-module-heading">
+              <span>Custom Clips</span>
+              <div class="source-card-actions">
+                <span id="snippet-counts" class="status-label">0 clips</span>
+              </div>
+            </div>
+            <input id="audio-file-input" type="file" accept=".wav,audio/wav,audio/x-wav,audio/mpeg,audio/mp3" hidden>
+            <div class="source-card-list" id="snippet-list"></div>
+          </div>
+          <div class="filmstrip-editor" aria-label="Single-trial sequence builder">
+            <div class="source-module-heading">
+              <span>Trial Sequence Rows</span>
+              <button id="add-strip-row" class="icon-action" type="button" title="Add trial sequence row" aria-label="Add trial sequence row">+</button>
+            </div>
+            <div id="filmstrip-list" class="filmstrip-list"></div>
+          </div>
+          <div class="step-footer">
+            <button type="button" class="primary" data-continue-step="trials">Continue To Trial-Block Design</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="decision-segment" aria-labelledby="block-segment-title">
+        <div class="segment-heading">
+          <span class="segment-kicker">Segment 5</span>
+          <h2 id="block-segment-title">Trial-Block Design</h2>
+        </div>
+        <section id="block" class="panel" data-step-panel="block" data-resizable-panel data-panel-id="block-design">
+          <div class="panel-heading">
+            <div class="panel-title">Block-Level Counterbalancing <span class="step-badge" data-step-badge="block"></span></div>
             <button id="export-protocol-note" type="button" disabled>Preview Only</button>
           </div>
           <div class="split-fields trial-decision-fields">
@@ -230,29 +323,18 @@
               <label for="blocks">Blocks</label>
               <input id="blocks" type="number" min="1" max="100" step="1">
             </div>
-            <div class="field-row">
-              <label for="catch-percent">Catch percent</label>
-              <input id="catch-percent" type="number" min="0" max="100" step="1">
+            <div class="field-row wide-field">
+              <label for="block-soa-values">SOA values ms</label>
+              <input id="block-soa-values" type="text" autocomplete="off">
             </div>
-          </div>
-          <div class="field-row">
-            <label for="soa-values">SOA values ms</label>
-            <input id="soa-values" type="text" autocomplete="off">
-          </div>
-          <div class="filmstrip-editor" aria-label="Within-block event sequence builder">
-            <div class="source-module-heading">
-              <span>Event Sequences</span>
-              <button id="add-strip-row" type="button">Add Event Sequence</button>
-            </div>
-            <div id="filmstrip-list" class="filmstrip-list"></div>
           </div>
           <div id="protocol-summary" class="summary-grid"></div>
           <div class="step-footer">
-            <button type="button" class="primary" data-continue-step="trials">Continue To Baseline</button>
+            <button type="button" class="primary" data-continue-step="block">Continue To Run Prep</button>
           </div>
         </section>
 
-        <section class="panel" data-step-panel="trials" data-resizable-panel data-panel-id="trial-preview">
+        <section class="panel" data-step-panel="block" data-resizable-panel data-panel-id="trial-preview">
           <div class="panel-heading">
             <div>Trial Preview</div>
             <span id="trial-count" class="muted"></span>
@@ -264,7 +346,7 @@
                   <th>Block</th>
                   <th>Trial</th>
                   <th>Type</th>
-                  <th>Event Sequence</th>
+                  <th>Trial Type</th>
                   <th>SOA</th>
                   <th>Space</th>
                   <th>Site</th>
@@ -277,49 +359,10 @@
         </section>
       </section>
 
-      <section class="decision-segment" aria-labelledby="baseline-segment-title">
-        <div class="segment-heading">
-          <span class="segment-kicker">Segment 4</span>
-          <h2 id="baseline-segment-title">Baseline Strategy</h2>
-        </div>
-        <section id="baseline" class="panel" data-step-panel="baseline" data-resizable-panel data-panel-id="baseline">
-          <div class="panel-heading">
-            <div class="panel-title">Baseline Trial Design <span class="step-badge" data-step-badge="baseline"></span></div>
-            <span id="baseline-status" class="status-label">checking</span>
-          </div>
-          <div class="baseline-grid">
-            <div class="field-row">
-              <label for="baseline-strategy">Baseline tactic</label>
-              <select id="baseline-strategy">
-                <option value="">Choose baseline...</option>
-                <option value="none">No baseline trials</option>
-                <option value="tactile_only">Tactile-only timing anchors</option>
-                <option value="soa_zero">Tactile at sound onset / SOA 0</option>
-                <option value="sound_offset">Tactile at sound offset / end</option>
-                <option value="custom">Custom baseline timing values</option>
-              </select>
-            </div>
-            <div class="field-row">
-              <label for="baseline-percent">Baseline percent</label>
-              <input id="baseline-percent" type="number" min="0" max="99" step="1">
-            </div>
-            <div class="field-row baseline-soa-field">
-              <label for="baseline-soa-values">Baseline timing values ms</label>
-              <input id="baseline-soa-values" type="text" autocomplete="off">
-            </div>
-          </div>
-          <div id="baseline-literature" class="baseline-strategy-note"></div>
-          <div id="baseline-summary" class="summary-grid"></div>
-          <div class="step-footer">
-            <button type="button" class="primary" data-continue-step="baseline">Continue To Run Prep</button>
-          </div>
-        </section>
-      </section>
-
       <section class="decision-segment" aria-labelledby="run-segment-title">
         <div class="segment-heading">
-          <span class="segment-kicker">Segment 5</span>
-          <h2 id="run-segment-title">Session Setup And Review</h2>
+          <span class="segment-kicker">Segment 6</span>
+          <h2 id="run-segment-title">Run Setup</h2>
         </div>
         <section class="run-grid">
           <section id="run" class="panel" data-step-panel="run" data-resizable-panel data-panel-id="run">
@@ -367,16 +410,22 @@
                 </table>
               </div>
             </section>
-
-            <section id="review" class="panel" data-step-panel="review" data-resizable-panel data-panel-id="review">
-              <div class="panel-heading">
-                <div class="panel-title">Review <span class="step-badge" data-step-badge="review"></span></div>
-                <button id="refresh-jobs" type="button">Refresh Jobs</button>
-              </div>
-              <div id="session-summary" class="summary-text"></div>
-              <div id="job-list" class="job-list"></div>
-            </section>
           </div>
+        </section>
+      </section>
+
+      <section class="decision-segment" aria-labelledby="review-segment-title">
+        <div class="segment-heading">
+          <span class="segment-kicker">Segment 7</span>
+          <h2 id="review-segment-title">Review</h2>
+        </div>
+        <section id="review" class="panel" data-step-panel="review" data-resizable-panel data-panel-id="review">
+          <div class="panel-heading">
+            <div class="panel-title">Review <span class="step-badge" data-step-badge="review"></span></div>
+            <button id="refresh-jobs" type="button">Refresh Jobs</button>
+          </div>
+          <div id="session-summary" class="summary-text"></div>
+          <div id="job-list" class="job-list"></div>
         </section>
       </section>
     </main>
