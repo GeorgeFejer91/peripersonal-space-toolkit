@@ -922,7 +922,31 @@ select:focus {
 .preview-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.zoom-control {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 34px);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.zoom-control button {
+  min-height: 32px;
+  border: 0;
+  border-radius: 0;
+  padding: 5px 0;
+  background: transparent;
+  font-weight: 700;
+}
+
+.zoom-control button + button {
+  border-left: 1px solid var(--line-strong);
 }
 
 .segmented-control {

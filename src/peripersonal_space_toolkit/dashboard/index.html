@@ -186,10 +186,15 @@
                   <button id="preview-mode-2d" type="button" class="mode-toggle active" data-preview-mode="2d">2D</button>
                   <button id="preview-mode-3d" type="button" class="mode-toggle" data-preview-mode="3d">3D</button>
                 </div>
+                <div class="zoom-control" aria-label="Trajectory preview zoom">
+                  <button id="zoom-out-camera" type="button" title="Zoom out" aria-label="Zoom out">-</button>
+                  <button id="zoom-in-camera" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+                </div>
+                <button id="fit-radius-camera" type="button">Fit Radius</button>
                 <button id="reset-camera" type="button">Reset Camera</button>
               </div>
             </div>
-            <iframe id="trajectory-frame" title="Trajectory preview" src="../viewer/index.html?v=pan-2d-view"></iframe>
+            <iframe id="trajectory-frame" title="Trajectory preview" src="../viewer/index.html?v=stable-zoom-2d-view"></iframe>
           </section>
 
             <section id="stimulus-feedback" class="panel" data-step-panel="stimulus" data-resizable-panel data-panel-id="stimulus-feedback">

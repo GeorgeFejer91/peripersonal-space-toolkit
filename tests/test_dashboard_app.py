@@ -95,8 +95,11 @@ def test_dashboard_static_assets_are_packaged():
     viewer_js = viewer_files.joinpath("trajectory-viewer.js").read_text(encoding="utf-8")
     assert 'href="styles.css"' in html
     assert 'src="app.js"' in html
-    assert 'src="../viewer/index.html?v=pan-2d-view"' in html
+    assert 'src="../viewer/index.html?v=stable-zoom-2d-view"' in html
     assert 'id="audio-file-input"' in html
+    assert 'id="zoom-in-camera"' in html
+    assert 'id="zoom-out-camera"' in html
+    assert 'id="fit-radius-camera"' in html
     assert 'id="import-audio-spatialize"' in html
     assert 'id="import-audio-preserve"' in html
     assert 'id="import-audio-prestimulus"' in html
@@ -134,6 +137,9 @@ def test_dashboard_static_assets_are_packaged():
     assert "Open Folder" in app_js
     assert "HTTP errors still mean the companion answered" in app_js
     assert "renderStimulusFeedback" in app_js
+    assert "callTrajectoryViewer" in app_js
+    assert "fitTrajectoryRadius" in app_js
+    assert "zoomTrajectoryCamera" in app_js
     assert "startBakeStimulus" in app_js
     assert "stageGeneratedNoise" in app_js
     assert "IMPORTED_AUDIO_HANDLING" in app_js
@@ -152,9 +158,14 @@ def test_dashboard_static_assets_are_packaged():
     assert "controls.enabled = false" in viewer_js
     assert "activePan2D" in viewer_js
     assert "set2DViewCenter" in viewer_js
+    assert "set2DVerticalSpan" in viewer_js
+    assert "zoomTrajectoryCamera" in viewer_js
+    assert "fitTrajectoryRadius" in viewer_js
     assert "two_d_radius_centered" in viewer_js
     assert "two_d_pan_enabled" in viewer_js
+    assert "two_d_zoom_enabled" in viewer_js
     assert "twoDFitVerticalSpanM" in viewer_js
+    assert "radiusChanged" not in viewer_js
     assert "trajectory-viewer.js?v=" in viewer_files.joinpath("index.html").read_text(encoding="utf-8")
     assert "/api/" not in html
 

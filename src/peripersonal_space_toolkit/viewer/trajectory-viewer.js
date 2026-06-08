@@ -34,12 +34,16 @@ let lastViewportWidth = 0;
 let lastViewportHeight = 0;
 let lastTwoDCameraDistance = 0;
 let lastTwoDVerticalSpan = 0;
+let lastTwoDFitVerticalSpan = 0;
 let lastTwoDFitAspect = 1;
 const HEAD_CENTER_Y = 1.33;
 const DISTANCE_CM_MIN = 1;
 const DISTANCE_CM_MAX = 1000;
 const TWO_D_RADIUS_PADDING = 1.24;
 const TWO_D_MIN_WORLD_SPAN = 0.5;
+const TWO_D_MIN_ZOOM_FACTOR = 0.22;
+const TWO_D_MAX_ZOOM_OUT_FACTOR = 3.0;
+const TWO_D_ZOOM_BUTTON_FACTOR = 1.18;
 const START_MARKER_COLOR = 0x4ecb71;
 const END_MARKER_COLOR = 0xe0524d;
 const ENDPOINT_2D_LIFT_M = 0.07;
@@ -54,22 +58,40 @@ let panStartClientX = 0;
 let panStartClientY = 0;
 const panStartTarget = new THREE.Vector3();
 
-function fit2DCameraToRadius({ resetCenter = true } = {}) {
+function fitted2DVerticalSpan() {
   const aspect = Math.max(0.1, camera.aspect || 1);
   const radiusSpan = Math.max(currentRadius * 2 * TWO_D_RADIUS_PADDING, TWO_D_MIN_WORLD_SPAN);
-  const verticalSpan = Math.max(radiusSpan, radiusSpan / aspect);
-  const distance = verticalSpan / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
-  lastTwoDCameraDistance = distance;
-  lastTwoDVerticalSpan = verticalSpan;
   lastTwoDFitAspect = aspect;
+  lastTwoDFitVerticalSpan = Math.max(radiusSpan, radiusSpan / aspect);
+  return lastTwoDFitVerticalSpan;
+}
+
+function min2DVerticalSpan() {
+  return Math.max(0.08, currentRadius * TWO_D_MIN_ZOOM_FACTOR);
+}
+
+function max2DVerticalSpan() {
+  const fittedSpan = lastTwoDFitVerticalSpan > 0 ? lastTwoDFitVerticalSpan : fitted2DVerticalSpan();
+  return Math.max(fittedSpan, currentRadius * 2) * TWO_D_MAX_ZOOM_OUT_FACTOR;
+}
+
+function set2DVerticalSpan(verticalSpan) {
+  const nextSpan = clamp(verticalSpan, min2DVerticalSpan(), max2DVerticalSpan());
+  lastTwoDVerticalSpan = nextSpan;
+  lastTwoDCameraDistance = nextSpan / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+  camera.updateProjectionMatrix();
+  set2DViewCenter(controls.target);
+  controls.minDistance = lastTwoDCameraDistance;
+  controls.maxDistance = lastTwoDCameraDistance;
+}
+
+function fit2DCameraToRadius({ resetCenter = true, resetZoom = true } = {}) {
+  const verticalSpan = fitted2DVerticalSpan();
   controls.enabled = false;
   if (resetCenter) {
     controls.target.set(0, 0, 0);
   }
-  set2DViewCenter(controls.target);
-  camera.updateProjectionMatrix();
-  controls.minDistance = distance;
-  controls.maxDistance = distance;
+  set2DVerticalSpan(resetZoom || lastTwoDVerticalSpan <= 0 ? verticalSpan : lastTwoDVerticalSpan);
 }
 
 function twoDViewSpans() {
@@ -81,8 +103,8 @@ function twoDViewSpans() {
 
 function clamp2DViewCenter(center) {
   const spans = twoDViewSpans();
-  const maxX = Math.max(0, spans.horizontal / 2 - currentRadius);
-  const maxZ = Math.max(0, spans.vertical / 2 - currentRadius);
+  const maxX = Math.max(0, Math.abs(spans.horizontal / 2 - currentRadius));
+  const maxZ = Math.max(0, Math.abs(spans.vertical / 2 - currentRadius));
   return new THREE.Vector3(
     clamp(center.x, -maxX, maxX),
     0,
@@ -95,6 +117,42 @@ function set2DViewCenter(center) {
   controls.target.copy(nextCenter);
   camera.position.set(nextCenter.x, lastTwoDCameraDistance, nextCenter.z);
   camera.lookAt(controls.target);
+  sync2DViewState();
+}
+
+function sync2DViewState() {
+  if (!window.__trajectoryViewerState || currentViewMode !== "2d") return;
+  window.__trajectoryViewerState.two_d_fit_vertical_span_m = lastTwoDFitVerticalSpan.toFixed(3);
+  window.__trajectoryViewerState.two_d_view_vertical_span_m = lastTwoDVerticalSpan.toFixed(3);
+  window.__trajectoryViewerState.two_d_camera_distance_m = lastTwoDCameraDistance.toFixed(3);
+  window.__trajectoryViewerState.two_d_view_center_x_m = controls.target.x.toFixed(3);
+  window.__trajectoryViewerState.two_d_view_center_z_m = controls.target.z.toFixed(3);
+  container.dataset.twoDFitVerticalSpanM = window.__trajectoryViewerState.two_d_fit_vertical_span_m;
+  container.dataset.twoDViewVerticalSpanM = window.__trajectoryViewerState.two_d_view_vertical_span_m;
+  container.dataset.twoDCameraDistanceM = window.__trajectoryViewerState.two_d_camera_distance_m;
+  container.dataset.twoDViewCenterXM = window.__trajectoryViewerState.two_d_view_center_x_m;
+  container.dataset.twoDViewCenterZM = window.__trajectoryViewerState.two_d_view_center_z_m;
+}
+
+function zoom2DView(direction) {
+  const factor = direction === "out" ? TWO_D_ZOOM_BUTTON_FACTOR : 1 / TWO_D_ZOOM_BUTTON_FACTOR;
+  set2DVerticalSpan(lastTwoDVerticalSpan * factor);
+}
+
+function zoom3DView(direction) {
+  const factor = direction === "out" ? TWO_D_ZOOM_BUTTON_FACTOR : 1 / TWO_D_ZOOM_BUTTON_FACTOR;
+  const offset = camera.position.clone().sub(controls.target);
+  const nextDistance = clamp(offset.length() * factor, controls.minDistance, controls.maxDistance);
+  camera.position.copy(controls.target).add(offset.setLength(nextDistance));
+  controls.update();
+}
+
+function zoomTrajectoryCamera(direction) {
+  if (currentViewMode === "2d") {
+    zoom2DView(direction);
+    return;
+  }
+  zoom3DView(direction);
 }
 
 function applyCameraMode(mode, resetCamera = false) {
@@ -105,7 +163,7 @@ function applyCameraMode(mode, resetCamera = false) {
     controls.enablePan = false;
     controls.minPolarAngle = 0;
     controls.maxPolarAngle = 0;
-    fit2DCameraToRadius({ resetCenter: resetCamera });
+    fit2DCameraToRadius({ resetCenter: resetCamera, resetZoom: resetCamera });
   } else {
     camera.up.set(0, 1, 0);
     controls.target.set(0, 0, 0);
@@ -113,6 +171,8 @@ function applyCameraMode(mode, resetCamera = false) {
     controls.enableRotate = true;
     controls.enableZoom = true;
     controls.enablePan = false;
+    controls.minDistance = 0.6;
+    controls.maxDistance = 8.0;
     controls.minPolarAngle = 0.08;
     controls.maxPolarAngle = Math.PI / 2;
     if (resetCamera) {
@@ -345,7 +405,6 @@ function drawScene(payload) {
   const is2D = mode === "2d";
   const radius = Math.max(0.1, payload.radius_m || 1.1);
   const modeChanged = currentViewMode !== mode;
-  const radiusChanged = Math.abs(currentRadius - radius) > 0.001;
   currentViewMode = mode;
   currentRadius = radius;
   if (!is2D) {
@@ -356,7 +415,7 @@ function drawScene(payload) {
     }
     renderer.domElement.style.cursor = "";
   }
-  applyCameraMode(mode, modeChanged || (is2D && radiusChanged));
+  applyCameraMode(mode, modeChanged);
 
   if (is2D) {
     const disk = new THREE.Mesh(
@@ -432,10 +491,12 @@ function drawScene(payload) {
     start_marker_color: "#4ecb71",
     end_marker_color: "#e0524d",
     two_d_radius_centered: is2D,
-    two_d_fit_vertical_span_m: is2D ? lastTwoDVerticalSpan.toFixed(3) : "",
+    two_d_fit_vertical_span_m: is2D ? lastTwoDFitVerticalSpan.toFixed(3) : "",
+    two_d_view_vertical_span_m: is2D ? lastTwoDVerticalSpan.toFixed(3) : "",
     two_d_camera_distance_m: is2D ? lastTwoDCameraDistance.toFixed(3) : "",
     two_d_fit_aspect: is2D ? lastTwoDFitAspect.toFixed(3) : "",
     two_d_pan_enabled: is2D,
+    two_d_zoom_enabled: is2D,
     two_d_view_center_x_m: is2D ? controls.target.x.toFixed(3) : "",
     two_d_view_center_z_m: is2D ? controls.target.z.toFixed(3) : "",
     start_distance_cm: payload.controls?.start_distance_cm ?? "",
@@ -455,9 +516,11 @@ function drawScene(payload) {
   container.dataset.endMarkerColor = window.__trajectoryViewerState.end_marker_color;
   container.dataset.twoDRadiusCentered = String(window.__trajectoryViewerState.two_d_radius_centered);
   container.dataset.twoDFitVerticalSpanM = window.__trajectoryViewerState.two_d_fit_vertical_span_m;
+  container.dataset.twoDViewVerticalSpanM = window.__trajectoryViewerState.two_d_view_vertical_span_m;
   container.dataset.twoDCameraDistanceM = window.__trajectoryViewerState.two_d_camera_distance_m;
   container.dataset.twoDFitAspect = window.__trajectoryViewerState.two_d_fit_aspect;
   container.dataset.twoDPanEnabled = String(window.__trajectoryViewerState.two_d_pan_enabled);
+  container.dataset.twoDZoomEnabled = String(window.__trajectoryViewerState.two_d_zoom_enabled);
   container.dataset.twoDViewCenterXM = window.__trajectoryViewerState.two_d_view_center_x_m;
   container.dataset.twoDViewCenterZM = window.__trajectoryViewerState.two_d_view_center_z_m;
   container.dataset.startDistanceCm = String(window.__trajectoryViewerState.start_distance_cm);
@@ -524,7 +587,7 @@ function resize() {
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   if (currentViewMode === "2d") {
-    fit2DCameraToRadius({ resetCenter: false });
+    fit2DCameraToRadius({ resetCenter: false, resetZoom: false });
   } else {
     camera.updateProjectionMatrix();
   }
@@ -563,5 +626,15 @@ window.updateTrajectory = function updateTrajectory(payload) {
 window.resetTrajectoryCamera = function resetTrajectoryCamera() {
   applyCameraMode(currentViewMode, true);
 };
+
+window.fitTrajectoryRadius = function fitTrajectoryRadius() {
+  if (currentViewMode === "2d") {
+    fit2DCameraToRadius({ resetCenter: true, resetZoom: true });
+    return;
+  }
+  applyCameraMode(currentViewMode, true);
+};
+
+window.zoomTrajectoryCamera = zoomTrajectoryCamera;
 
 container.dataset.viewerReady = "true";

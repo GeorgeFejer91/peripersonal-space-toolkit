@@ -1171,6 +1171,12 @@ function setPreviewMode(mode) {
   updateViewer();
 }
 
+function callTrajectoryViewer(method, ...args) {
+  const frame = $("trajectory-frame");
+  const fn = frame.contentWindow?.[method];
+  if (typeof fn === "function") fn(...args);
+}
+
 function currentTrajectoryControls() {
   return {
     start_distance_cm: clampNumber(numberValue("start-distance", 110), 1, 1000, 110),
@@ -1658,9 +1664,11 @@ function wireEvents() {
   $("soa-values").addEventListener("input", updateFilmstripCounts);
   $("repetitions").addEventListener("input", updateFilmstripCounts);
   $("reset-camera").addEventListener("click", () => {
-    const frame = $("trajectory-frame");
-    if (frame.contentWindow.resetTrajectoryCamera) frame.contentWindow.resetTrajectoryCamera();
+    callTrajectoryViewer("resetTrajectoryCamera");
   });
+  $("fit-radius-camera").addEventListener("click", () => callTrajectoryViewer("fitTrajectoryRadius"));
+  $("zoom-in-camera").addEventListener("click", () => callTrajectoryViewer("zoomTrajectoryCamera", "in"));
+  $("zoom-out-camera").addEventListener("click", () => callTrajectoryViewer("zoomTrajectoryCamera", "out"));
   $("preview-mode").addEventListener("change", () => setPreviewMode($("preview-mode").value));
   for (const id of TRAJECTORY_FIELD_IDS) {
     $(id).addEventListener("input", updateViewer);
