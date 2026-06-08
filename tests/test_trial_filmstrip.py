@@ -47,7 +47,7 @@ def _filmstrip_design(source_count: int = 4):
         trial_strips=[
             TrialStripSpec(
                 strip_id="inhale-row",
-                label="Inhale row",
+                label="Inhale event",
                 elements=[
                     TrialStripElementSpec(kind="fixed_audio", label="Inhale", source_label="Inhale"),
                     TrialStripElementSpec(kind="looming_stimulus", label="Looming Stimulus", source_labels=source_labels, randomized=True),
@@ -55,7 +55,7 @@ def _filmstrip_design(source_count: int = 4):
             ),
             TrialStripSpec(
                 strip_id="exhale-row",
-                label="Exhale row",
+                label="Exhale event",
                 elements=[
                     TrialStripElementSpec(kind="fixed_audio", label="Exhale", source_label="Exhale"),
                     TrialStripElementSpec(kind="looming_stimulus", label="Looming Stimulus", source_labels=source_labels, randomized=True),
@@ -66,18 +66,18 @@ def _filmstrip_design(source_count: int = 4):
     return design
 
 
-def test_trial_strips_round_trip_and_interleave_rows():
+def test_trial_strips_round_trip_and_interleave_within_block_event_sequences():
     design = design_from_dict(design_to_dict(_filmstrip_design()))
 
     rows = block_trial_rows(design)
 
     assert len(rows) == 2 * 4 * 5
-    assert rows[0]["trial_strip_label"] == "Inhale row"
-    assert rows[1]["trial_strip_label"] == "Exhale row"
-    assert rows[2]["trial_strip_label"] == "Inhale row"
-    assert rows[3]["trial_strip_label"] == "Exhale row"
-    assert sum(1 for row in rows if row["trial_strip_label"] == "Inhale row") == 20
-    assert sum(1 for row in rows if row["trial_strip_label"] == "Exhale row") == 20
+    assert rows[0]["trial_strip_label"] == "Inhale event"
+    assert rows[1]["trial_strip_label"] == "Exhale event"
+    assert rows[2]["trial_strip_label"] == "Inhale event"
+    assert rows[3]["trial_strip_label"] == "Exhale event"
+    assert sum(1 for row in rows if row["trial_strip_label"] == "Inhale event") == 20
+    assert sum(1 for row in rows if row["trial_strip_label"] == "Exhale event") == 20
     assert all(" | " in row["sequence_labels"] for row in rows)
 
 
@@ -110,7 +110,7 @@ def test_filmstrip_protocol_csv_and_block_manifest_include_sequence_columns(tmp_
     export_protocol_csv(design, protocol_path)
     protocol_rows = list(csv.DictReader(protocol_path.open(encoding="utf-8")))
 
-    assert protocol_rows[0]["trial_strip_label"] in {"Inhale row", "Exhale row"}
+    assert protocol_rows[0]["trial_strip_label"] in {"Inhale event", "Exhale event"}
     assert protocol_rows[0]["sequence_labels"]
     assert protocol_rows[0]["tactile_enabled"] == "True"
 

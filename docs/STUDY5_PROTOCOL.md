@@ -29,7 +29,7 @@ The preload asset inventory lives at `assets/preloads/preload_inventory.json`, w
 
 ## Dashboard Preload
 
-The HTML dashboard profile `study5_box_breathing_pps` is the unpublished local Study 5 preload. It is separate from published-study profiles such as Canzoneri et al. (2012) and preloads the bundled 4-second inhale/exhale instruction WAVs, bundled 4-second auditory-only looming source WAVs, and the default `Inhale instruction | Looming Stimulus` and `Exhale instruction | Looming Stimulus` filmstrip rows.
+The HTML dashboard profile `study5_box_breathing_pps` is the unpublished local Study 5 preload. It is separate from published-study profiles such as Canzoneri et al. (2012) and preloads the bundled 4-second inhale/exhale instruction WAVs, bundled 4-second auditory-only looming source WAVs, and the default `Inhale instruction | Looming Stimulus` and `Exhale instruction | Looming Stimulus` within-block event sequences.
 
 This profile is the default dashboard startup profile. Fresh launches and scratch-custom startup states initialize from Study 5 so the current lab workflow is ready without selecting a profile manually.
 

@@ -126,10 +126,16 @@ def test_dashboard_static_assets_are_packaged():
     assert "Trajectory And Source" in html
     assert "Backend Feedback" in html
     assert "Trial Designer" in html
+    assert "Within-Block Event Assembly" in html
+    assert "Event Sequences" in html
+    assert "Add Event Sequence" in html
+    assert "Event Sequence" in html
     assert "Run Setup" in html
     assert html.index('id="participants"') > html.index('id="run"')
     assert "Custom Stimulus Builder" not in html
     assert "Bake Stimulus" in html
+    assert "Filmstrip Trial Assembly" not in html
+    assert "Add Row" not in html
     assert "Choose noise to bake" in html
     assert "Add generated noise..." not in html
     assert "Dry Custom Tone" in html
@@ -140,6 +146,11 @@ def test_dashboard_static_assets_are_packaged():
     assert "data-preview-strip" in app_js
     assert "filmstrip-preview-button" in app_js
     assert "previewFilmstripRow" in app_js
+    assert "Prelisten event sequence" in app_js
+    assert "Event label" in app_js
+    assert "Remove Event" in app_js
+    assert "events/block" in app_js
+    assert "Row label" not in app_js
     assert "renderPreloadAssetStatus" in app_js
     assert "/api/local/open-folder" in app_js
     assert "data-open-folder" in app_js
@@ -202,7 +213,7 @@ def test_dashboard_pages_companion_contract(tmp_path: Path):
     assert synced["ready_asset_count"] == 4
 
 
-def test_dashboard_loads_unpublished_study5_preload_with_instruction_rows(tmp_path: Path):
+def test_dashboard_loads_unpublished_study5_preload_with_instruction_events(tmp_path: Path):
     client = _client(tmp_path)
 
     loaded = client.post("/api/templates/study5_box_breathing_pps/load").json()
@@ -228,7 +239,7 @@ def test_dashboard_loads_unpublished_study5_preload_with_instruction_rows(tmp_pa
     assert loaded["preflight"]["render_ready"] is True
 
     strips = design["protocol"]["trial_strips"]
-    assert [strip["label"] for strip in strips] == ["Inhale row", "Exhale row"]
+    assert [strip["label"] for strip in strips] == ["Inhale event", "Exhale event"]
     assert [strip["elements"][0]["source_label"] for strip in strips] == ["Inhale instruction", "Exhale instruction"]
     assert all(strip["elements"][1]["randomized"] for strip in strips)
     assert all(strip["elements"][1]["source_labels"] for strip in strips)

@@ -5,7 +5,7 @@
   "source_url": "docs/STUDY5_PROTOCOL.md",
   "doi": "",
   "verification_status": "verified",
-  "notes": "Local unpublished Study 5 preload. This profile is not a published-study citation; it preloads the lab's box-breathing PPS workflow with bundled 4-second inhale/exhale instruction assets, Study 5 trajectory defaults, SOAs, catch trials, and filmstrip trial rows.",
+  "notes": "Local unpublished Study 5 preload. This profile is not a published-study citation; it preloads the lab's box-breathing PPS workflow with bundled 4-second inhale/exhale instruction assets, Study 5 trajectory defaults, SOAs, catch trials, and within-block event sequences.",
   "reference_parameters": {
     "profile_type": "local_unpublished_study5_box_breathing_pps",
     "publication_status": "unpublished_lab_profile",
@@ -152,7 +152,7 @@
       "trial_strips": [
         {
           "strip_id": "study5-inhale-row",
-          "label": "Inhale row",
+          "label": "Inhale event",
           "elements": [
             {
               "element_id": "study5-inhale-instruction",
@@ -174,7 +174,7 @@
         },
         {
           "strip_id": "study5-exhale-row",
-          "label": "Exhale row",
+          "label": "Exhale event",
           "elements": [
             {
               "element_id": "study5-exhale-instruction",
@@ -213,7 +213,7 @@
     },
     {
       "field": "visible trial assembly",
-      "source": "Local Study 5 dashboard workflow uses filmstrip rows: Inhale instruction | Looming Stimulus and Exhale instruction | Looming Stimulus."
+      "source": "Local Study 5 dashboard workflow uses within-block event sequences: Inhale instruction | Looming Stimulus and Exhale instruction | Looming Stimulus."
     },
     {
       "field": "trajectory and SOAs",

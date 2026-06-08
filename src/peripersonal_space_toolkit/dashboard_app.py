@@ -154,7 +154,7 @@ class DashboardController:
             try:
                 design = load_design(self.design_path)
                 if not _should_replace_saved_design_with_default_profile(design):
-                    return design
+                    return _normalize_study5_event_sequence_labels(design)
             except Exception:
                 pass
         return self._default_profile_design()
@@ -163,7 +163,7 @@ class DashboardController:
         template = next((item for item in self.templates if item.template_id == DEFAULT_STUDY_TEMPLATE_ID), None)
         if template is None:
             return default_design()
-        return _copy_design(template.design)
+        return _normalize_study5_event_sequence_labels(_copy_design(template.design))
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -231,7 +231,7 @@ class DashboardController:
             raise KeyError(template_id)
         self.sync_preload_assets(template_id)
         with self._lock:
-            self.design = _copy_design(template.design)
+            self.design = _normalize_study5_event_sequence_labels(_copy_design(template.design))
             self.current_run_package = None
         return self.snapshot()
 
@@ -268,6 +268,7 @@ class DashboardController:
                 self.design = design_from_dict(payload)
             if "trajectory_controls" in payload:
                 self.design = _apply_trajectory_controls(self.design, dict(payload["trajectory_controls"]))
+            self.design = _normalize_study5_event_sequence_labels(self.design)
             self.current_run_package = None
             save_design(self.design, self.design_path)
         return self.snapshot()
@@ -443,10 +444,10 @@ class DashboardController:
 
         strips = [strip for strip in design.protocol.trial_strips if strip.elements]
         if not strips:
-            raise ValueError("Create a filmstrip row before previewing audio.")
+            raise ValueError("Create an event sequence before previewing audio.")
         strip_index = max(0, int(_float(payload.get("strip_index"), 0)))
         if strip_index >= len(strips):
-            raise ValueError("The requested filmstrip row does not exist.")
+            raise ValueError("The requested event sequence does not exist.")
         return _trial_strip_audio_preview(
             design,
             strips[strip_index],
@@ -801,7 +802,7 @@ def _trial_strip_audio_preview(
 ) -> dict[str, Any]:
     chunks = _trial_strip_preview_chunks(design, strip, render_dir)
     if not chunks:
-        raise ValueError("This filmstrip row has no playable audio elements.")
+        raise ValueError("This event sequence has no playable audio elements.")
     preview_dir.mkdir(parents=True, exist_ok=True)
     preview_path = preview_dir / f"row_{strip_index + 1}_{_slug(strip.label or 'filmstrip')}_{uuid.uuid4().hex[:8]}.wav"
     duration_s = _write_trial_strip_preview_wav(preview_path, chunks)
@@ -814,7 +815,7 @@ def _trial_strip_audio_preview(
         "duration_s": duration_s,
         "local_only": True,
         "auditory_preview_only": True,
-        "message": "Temporary browser-playable row preview assembled by the local companion backend.",
+        "message": "Temporary browser-playable event-sequence preview assembled by the local companion backend.",
     }
 
 
@@ -827,7 +828,7 @@ def _trial_strip_preview_chunks(design: StimulusDesign, strip: Any, render_dir: 
         if element.kind == "fixed_audio":
             asset = fixed.get(element.source_label)
             if asset is None:
-                raise ValueError(f"Filmstrip row references an unknown fixed clip: {element.source_label}")
+                raise ValueError(f"Event sequence references an unknown fixed clip: {element.source_label}")
             chunks.append(
                 {
                     "kind": "fixed_audio",
@@ -840,7 +841,7 @@ def _trial_strip_preview_chunks(design: StimulusDesign, strip: Any, render_dir: 
             labels = [label for label in element.source_labels if label] or list(source_wavs)
             playable = [(label, _source_key(label)) for label in labels if _source_key(label) in source_wavs]
             if not playable:
-                raise ValueError("Bake or render at least one selected looming source before previewing this row.")
+                raise ValueError("Bake or render at least one selected looming source before previewing this event sequence.")
             selected, selected_key = random.choice(playable)
             asset = source_assets.get(selected)
             chunks.append(
@@ -888,7 +889,7 @@ def _write_trial_strip_preview_wav(path: Path, chunks: list[dict[str, Any]]) -> 
         import soundfile as sf
         from scipy import signal
     except ImportError as exc:
-        raise RuntimeError("Install numpy, scipy, and soundfile to preview filmstrip rows.") from exc
+        raise RuntimeError("Install numpy, scipy, and soundfile to preview event sequences.") from exc
 
     sample_rate = 0
     audio_chunks = []
@@ -910,7 +911,7 @@ def _write_trial_strip_preview_wav(path: Path, chunks: list[dict[str, Any]]) -> 
         audio_chunks.append(data * gain)
 
     if not audio_chunks or not sample_rate:
-        raise ValueError("No audio data was available for this filmstrip row.")
+        raise ValueError("No audio data was available for this event sequence.")
     preview = np.concatenate(audio_chunks, axis=0)
     peak = float(np.max(np.abs(preview))) if preview.size else 0.0
     if peak > 0.99:
@@ -1124,7 +1125,7 @@ def _custom_trials_missing(design: StimulusDesign) -> list[str]:
     if not p.soa_values_ms:
         missing.append("Enter at least one SOA value.")
     if not has_trial_strips(p):
-        missing.append("Create at least one filmstrip row.")
+        missing.append("Create at least one within-block event sequence.")
     if not p.tactile_sites:
         missing.append("Keep at least one tactile site.")
     if not p.respiratory_phases:
@@ -1177,6 +1178,24 @@ def _job_to_dict(job: DashboardJob) -> dict[str, Any]:
 
 def _copy_design(design: StimulusDesign) -> StimulusDesign:
     return design_from_dict(design_to_dict(design))
+
+
+def _normalize_study5_event_sequence_labels(design: StimulusDesign) -> StimulusDesign:
+    if design.study_profile_id != DEFAULT_STUDY_TEMPLATE_ID:
+        return design
+    updated = _copy_design(design)
+    label_map = {
+        "Inhale row": "Inhale event",
+        "Exhale row": "Exhale event",
+    }
+    for strip in updated.protocol.trial_strips:
+        strip.label = label_map.get(strip.label, strip.label)
+    if "filmstrip trial rows" in updated.study_profile_notes:
+        updated.study_profile_notes = updated.study_profile_notes.replace(
+            "filmstrip trial rows",
+            "within-block event sequences",
+        )
+    return updated
 
 
 def _should_replace_saved_design_with_default_profile(design: StimulusDesign) -> bool:

@@ -577,7 +577,7 @@ function renderTrialStrips() {
   const strips = state.design.protocol?.trial_strips || [];
   list.innerHTML = "";
   if (!strips.length) {
-    list.innerHTML = `<div class="filmstrip-empty">No filmstrip rows.</div>`;
+    list.innerHTML = `<div class="filmstrip-empty">No event sequences.</div>`;
     return;
   }
   strips.forEach((strip, index) => list.appendChild(renderTrialStripRow(strip, index)));
@@ -590,10 +590,10 @@ function renderTrialStripRow(strip, index) {
   row.dataset.stripIndex = String(index);
   row.innerHTML = `
     <div class="filmstrip-row-header">
-      <button type="button" class="filmstrip-preview-button" data-preview-strip="${index}" title="Prelisten row" aria-label="Prelisten row">&#9658;</button>
+      <button type="button" class="filmstrip-preview-button" data-preview-strip="${index}" title="Prelisten event sequence" aria-label="Prelisten event sequence">&#9658;</button>
       <div class="field-row">
-        <label>Row label</label>
-        <input data-strip-field="label" value="${escapeAttr(strip.label || `Row ${index + 1}`)}">
+        <label>Event label</label>
+        <input data-strip-field="label" value="${escapeAttr(strip.label || `Event ${index + 1}`)}">
       </div>
       <div class="filmstrip-row-actions">
         <span class="filmstrip-count" data-strip-count></span>
@@ -601,7 +601,7 @@ function renderTrialStripRow(strip, index) {
         <button type="button" data-strip-move="down">Down</button>
         <button type="button" data-add-strip-element="fixed_audio">Add Clip</button>
         <button type="button" data-add-strip-element="looming_stimulus">Add Looming Stimulus</button>
-        <button type="button" data-remove-strip>Remove Row</button>
+        <button type="button" data-remove-strip>Remove Event</button>
       </div>
     </div>
     <div class="filmstrip-sequence"></div>
@@ -733,7 +733,7 @@ function updateFilmstripCounts() {
     const selected = slot ? slot.querySelectorAll('[data-element-field="source_labels"] option:checked').length : 0;
     const sourceCount = selected || stimulusSourceDetailsFromDom().length;
     const total = sourceCount * Math.max(soaCount, 0) * repetitions;
-    count.textContent = `${sourceCount} stimuli x ${soaCount} SOAs x ${repetitions} reps = ${total} trials/block`;
+    count.textContent = `${sourceCount} stimuli x ${soaCount} SOAs x ${repetitions} reps = ${total} events/block`;
   }
 }
 
@@ -782,7 +782,7 @@ function addFilmstripRow() {
   const strips = collectTrialStrips();
   strips.push({
     strip_id: `strip-${strips.length + 1}`,
-    label: `Row ${strips.length + 1}`,
+    label: `Event ${strips.length + 1}`,
     elements: [defaultFilmstripElement("looming_stimulus")],
   });
   setTrialStrips(strips);

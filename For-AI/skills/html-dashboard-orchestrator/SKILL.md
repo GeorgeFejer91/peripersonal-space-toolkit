@@ -40,7 +40,8 @@ In this repo:
    - Keep one-page navigation and direct panel resizing behavior intact.
    - Treat one-page website sections as workflow segments. Each segment should represent one natural user decision stage, and panels should stay localized to the segment where that decision is made.
    - Do not let unrelated controls share a segment just because they fit on screen. Move participant/session/run controls, previews, backend feedback, or review panes to the functional segment that owns them.
-   - For the PPS dashboard, preserve the sequence: profile decision, looming-stimulus builder, trial designer, then run/session review. The looming-stimulus builder owns trajectory controls, preview, source staging/baking, baked-source cards, and bake/render feedback; the trial designer owns filmstrip rows, SOAs, repetitions, blocks, catch percentage, and trial preview.
+   - For the PPS dashboard, preserve the sequence: profile decision, looming-stimulus builder, trial designer, then run/session review. The looming-stimulus builder owns trajectory controls, preview, source staging/baking, baked-source cards, and bake/render feedback; the trial designer owns within-block event sequences, SOAs, repetitions, blocks, catch percentage, and trial preview.
+   - Treat filmstrip/event-sequence rows as sequential events inside the current block, not as separate blocks or block definitions. Keep visible labels aligned with this mental model even if internal schema names still use `trial_strips`.
 
 4. Keep source and file handling local.
    - File selection may happen in browser, but import/store/process must happen through the local companion backend.

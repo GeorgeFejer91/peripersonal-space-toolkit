@@ -36,7 +36,7 @@ def test_dashboard_starts_from_study5_when_no_deliberate_profile_is_saved(tmp_pa
     assert fresh["selected_template"] == DEFAULT_STUDY_TEMPLATE_ID
     assert fresh["design"]["prestimulus_files"][0]["label"] == "Inhale instruction"
     assert fresh["design"]["custom_looming_files"][0]["label"] == "Pink frontal"
-    assert fresh["design"]["protocol"]["trial_strips"][0]["label"] == "Inhale row"
+    assert fresh["design"]["protocol"]["trial_strips"][0]["label"] == "Inhale event"
     assert fresh["preload_inventory"]["status"] == "ready"
     assert fresh["preflight"]["render_ready"] is True
 
@@ -70,6 +70,29 @@ def test_dashboard_preserves_deliberate_saved_profile(tmp_path: Path):
 
     assert state["selected_template"] == DEFAULT_STUDY_TEMPLATE_ID
     assert state["design"]["name"] == "Edited Study 5 working copy"
+
+
+def test_dashboard_migrates_legacy_study5_row_labels_on_saved_profile_load(tmp_path: Path):
+    saved_design = _study5_template().design
+    saved_design.protocol.trial_strips[0].label = "Inhale row"
+    saved_design.protocol.trial_strips[1].label = "Exhale row"
+    saved_design.study_profile_notes = "Legacy Study 5 config with filmstrip trial rows."
+    saved_path = tmp_path / "legacy_study5.json"
+    save_design(saved_design, saved_path)
+
+    state = DashboardController(
+        design_path=saved_path,
+        render_dir=tmp_path / "render",
+        session_root=tmp_path / "sessions",
+        import_dir=tmp_path / "imports",
+    ).snapshot()
+
+    assert [strip["label"] for strip in state["design"]["protocol"]["trial_strips"]] == [
+        "Inhale event",
+        "Exhale event",
+    ]
+    assert "within-block event sequences" in state["design"]["study_profile_notes"]
+    assert "filmstrip trial rows" not in state["design"]["study_profile_notes"]
 
 
 def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
@@ -119,7 +142,7 @@ def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
     assert all(asset["sha256_ok"] is True for asset in asset_status["assets"])
 
     strips = design.protocol.trial_strips
-    assert [strip.label for strip in strips] == ["Inhale row", "Exhale row"]
+    assert [strip.label for strip in strips] == ["Inhale event", "Exhale event"]
     assert [strip.elements[0].source_label for strip in strips] == ["Inhale instruction", "Exhale instruction"]
     for strip in strips:
         assert strip.elements[0].kind == "fixed_audio"
@@ -132,5 +155,5 @@ def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
     rows = block_trial_rows(design)
     noncatch = [row for row in rows if row["trial_type"] == "Audio-Tactile"]
     assert len(noncatch) == design.protocol.blocks * 2 * len(design.custom_looming_files) * len(design.protocol.soa_values_ms)
-    assert {row["trial_strip_label"] for row in rows} == {"Inhale row", "Exhale row"}
+    assert {row["trial_strip_label"] for row in rows} == {"Inhale event", "Exhale event"}
     assert all("instruction | " in row["sequence_labels"] for row in rows)
