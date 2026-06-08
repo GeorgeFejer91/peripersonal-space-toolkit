@@ -5,14 +5,72 @@ from pathlib import Path
 
 import pytest
 
-from peripersonal_space_toolkit.design import block_trial_rows, validate_design
-from peripersonal_space_toolkit.templates import load_templates
+from peripersonal_space_toolkit.dashboard_app import DashboardController
+from peripersonal_space_toolkit.design import block_trial_rows, default_design, save_design, validate_design
+from peripersonal_space_toolkit.templates import DEFAULT_STUDY_TEMPLATE_ID, load_templates
+
+
+def _study5_template():
+    root = Path(__file__).resolve().parents[1]
+    templates = load_templates(root / "study_templates")
+    return next(template for template in templates if template.template_id == DEFAULT_STUDY_TEMPLATE_ID)
+
+
+def test_study5_is_first_default_preload():
+    root = Path(__file__).resolve().parents[1]
+    templates = load_templates(root / "study_templates")
+
+    assert templates[0].template_id == DEFAULT_STUDY_TEMPLATE_ID
+
+
+def test_dashboard_starts_from_study5_when_no_deliberate_profile_is_saved(tmp_path: Path):
+    missing_design_path = tmp_path / "missing.json"
+    fresh = DashboardController(
+        design_path=missing_design_path,
+        render_dir=tmp_path / "render",
+        session_root=tmp_path / "sessions",
+        import_dir=tmp_path / "imports",
+    ).snapshot()
+
+    assert fresh["selected_template"] == DEFAULT_STUDY_TEMPLATE_ID
+    assert fresh["design"]["prestimulus_files"][0]["label"] == "Inhale instruction"
+    assert fresh["design"]["protocol"]["trial_strips"][0]["label"] == "Inhale row"
+
+    scratch_design = default_design()
+    scratch_design.name = "Manual scratch design"
+    scratch_design.study_profile_reference_parameters = {"dashboard_mode": "custom"}
+    scratch_path = tmp_path / "custom_scratch.json"
+    save_design(scratch_design, scratch_path)
+    from_scratch = DashboardController(
+        design_path=scratch_path,
+        render_dir=tmp_path / "render",
+        session_root=tmp_path / "sessions",
+        import_dir=tmp_path / "imports",
+    ).snapshot()
+
+    assert from_scratch["selected_template"] == DEFAULT_STUDY_TEMPLATE_ID
+
+
+def test_dashboard_preserves_deliberate_saved_profile(tmp_path: Path):
+    saved_design = _study5_template().design
+    saved_design.name = "Edited Study 5 working copy"
+    saved_path = tmp_path / "saved_profile.json"
+    save_design(saved_design, saved_path)
+
+    state = DashboardController(
+        design_path=saved_path,
+        render_dir=tmp_path / "render",
+        session_root=tmp_path / "sessions",
+        import_dir=tmp_path / "imports",
+    ).snapshot()
+
+    assert state["selected_template"] == DEFAULT_STUDY_TEMPLATE_ID
+    assert state["design"]["name"] == "Edited Study 5 working copy"
 
 
 def test_unpublished_study5_template_preloads_breathing_assets_and_filmstrip():
     root = Path(__file__).resolve().parents[1]
-    templates = load_templates(root / "study_templates")
-    study5 = next(template for template in templates if template.template_id == "study5_box_breathing_pps")
+    study5 = _study5_template()
     design = study5.design
 
     assert study5.doi == ""

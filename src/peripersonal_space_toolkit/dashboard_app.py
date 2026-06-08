@@ -44,7 +44,14 @@ from .design import (
     validate_design,
 )
 from .session_runner import DEFAULT_RENDER_DIR, DEFAULT_SESSION_ROOT, RunPackage, prepare_run_package, preflight_run_package, rendered_wavs
-from .templates import StudyTemplate, load_templates, study_template_bibtex, study_template_citation_label, study_template_csl_json
+from .templates import (
+    DEFAULT_STUDY_TEMPLATE_ID,
+    StudyTemplate,
+    load_templates,
+    study_template_bibtex,
+    study_template_citation_label,
+    study_template_csl_json,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -131,10 +138,18 @@ class DashboardController:
     def _load_initial_design(self) -> StimulusDesign:
         if self.design_path.exists():
             try:
-                return load_design(self.design_path)
+                design = load_design(self.design_path)
+                if not _should_replace_saved_design_with_default_profile(design):
+                    return design
             except Exception:
                 pass
-        return default_design()
+        return self._default_profile_design()
+
+    def _default_profile_design(self) -> StimulusDesign:
+        template = next((item for item in self.templates if item.template_id == DEFAULT_STUDY_TEMPLATE_ID), None)
+        if template is None:
+            return default_design()
+        return _copy_design(template.design)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -947,6 +962,15 @@ def _job_to_dict(job: DashboardJob) -> dict[str, Any]:
 
 def _copy_design(design: StimulusDesign) -> StimulusDesign:
     return design_from_dict(design_to_dict(design))
+
+
+def _should_replace_saved_design_with_default_profile(design: StimulusDesign) -> bool:
+    if design.study_profile_id:
+        return False
+    mode = str(design.study_profile_reference_parameters.get("dashboard_mode", "")).strip().lower()
+    if mode == "custom":
+        return True
+    return design.name.strip() in {"", "Study 5 PPS design", "Custom PPS design"}
 
 
 def _load_json(path: Path) -> dict[str, Any]:

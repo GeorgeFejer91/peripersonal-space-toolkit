@@ -100,6 +100,8 @@ def test_dashboard_static_assets_are_packaged():
     assert 'id="zoom-in-camera"' in html
     assert 'id="zoom-out-camera"' in html
     assert 'id="fit-radius-camera"' in html
+    assert "Study/profile preload" in html
+    assert "Published preload" not in html
     assert 'id="import-audio-spatialize"' in html
     assert 'id="import-audio-preserve"' in html
     assert 'id="import-audio-prestimulus"' in html

@@ -11,6 +11,9 @@ from typing import Any
 from .design import StimulusDesign, design_from_dict
 
 
+DEFAULT_STUDY_TEMPLATE_ID = "study5_box_breathing_pps"
+
+
 @dataclass
 class StudyTemplate:
     template_id: str
@@ -158,4 +161,11 @@ def load_templates(template_dir: Path) -> list[StudyTemplate]:
     if not template_dir.exists():
         return []
     templates = [load_template(path) for path in sorted(template_dir.glob("*.json"))]
-    return sorted(templates, key=lambda item: (item.verification_status != "verified", item.title))
+    return sorted(
+        templates,
+        key=lambda item: (
+            item.template_id != DEFAULT_STUDY_TEMPLATE_ID,
+            item.verification_status != "verified",
+            item.title,
+        ),
+    )

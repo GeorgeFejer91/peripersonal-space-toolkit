@@ -25,6 +25,8 @@ The public assets include separate 4-second inhale and exhale instruction WAVs. 
 
 The HTML dashboard profile `study5_box_breathing_pps` is the unpublished local Study 5 preload. It is separate from published-study profiles such as Canzoneri et al. (2012) and preloads the bundled 4-second inhale/exhale instruction WAVs plus the default `Inhale instruction | Looming Stimulus` and `Exhale instruction | Looming Stimulus` filmstrip rows.
 
+This profile is the default dashboard startup profile. Fresh launches and scratch-custom startup states initialize from Study 5 so the current lab workflow is ready without selecting a profile manually.
+
 ## Data Outputs
 
 The runner stores loopback recordings and demographics locally. The decoder reconstructs trial timing from WAV recordings, then writes diagnostics, final CSVs, and summaries under the decoded artifact directory.
