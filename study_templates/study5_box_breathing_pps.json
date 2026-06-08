@@ -1,0 +1,216 @@
+{
+  "template_id": "study5_box_breathing_pps",
+  "title": "Study 5 PPS box-breathing profile",
+  "citation": "PPS Toolkit Study 5 protocol (2026). Box-breathing audio-tactile PPS profile. Unpublished lab profile.",
+  "source_url": "docs/STUDY5_PROTOCOL.md",
+  "doi": "",
+  "verification_status": "verified",
+  "notes": "Local unpublished Study 5 preload. This profile is not a published-study citation; it preloads the lab's box-breathing PPS workflow with bundled 4-second inhale/exhale instruction assets, Study 5 trajectory defaults, SOAs, catch trials, and filmstrip trial rows.",
+  "reference_parameters": {
+    "profile_type": "local_unpublished_study5_box_breathing_pps",
+    "publication_status": "unpublished_lab_profile",
+    "instruction_assets_bundled": true,
+    "instruction_duration_s": 4.0,
+    "inhale_instruction_asset": "assets/breathing/Inhale-2-3-4-hold_FIXED.wav",
+    "exhale_instruction_asset": "assets/breathing/Exhale-2-3-4-hold_FIXED.wav",
+    "trial_unit_duration_s": 8.0,
+    "looming_stimulus_window_s": 4.0,
+    "movement_duration_s": 3.0,
+    "movement_start_distance_cm": 110.0,
+    "movement_end_distance_cm": 10.0,
+    "start_hold_s": 0.5,
+    "end_hold_s": 0.5,
+    "tactile_pulse_duration_ms": 100,
+    "local_only_assets": true
+  },
+  "design": {
+    "name": "Study 5 PPS box-breathing design",
+    "sofa_file": "assets/0. Head-Related Impulse Response (HRIR) model/FABIAN_HRIR_measured_HATO_0.sofa",
+    "noises": [
+      {
+        "label": "Pink frontal",
+        "noise_type": "pink",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 0.0,
+        "gain": 1.0,
+        "sequence_order": 2,
+        "motion_mode": "looming"
+      },
+      {
+        "label": "Blue frontal",
+        "noise_type": "blue",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 0.0,
+        "gain": 1.0,
+        "sequence_order": 2,
+        "motion_mode": "looming"
+      },
+      {
+        "label": "White frontal",
+        "noise_type": "white",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 0.0,
+        "gain": 1.0,
+        "sequence_order": 2,
+        "motion_mode": "looming"
+      },
+      {
+        "label": "Brown frontal",
+        "noise_type": "brown",
+        "azimuth_deg": 0.0,
+        "elevation_deg": 0.0,
+        "gain": 1.0,
+        "sequence_order": 2,
+        "motion_mode": "looming"
+      }
+    ],
+    "custom_looming_files": [],
+    "prestimulus_files": [
+      {
+        "label": "Inhale instruction",
+        "path": "assets/breathing/Inhale-2-3-4-hold_FIXED.wav",
+        "target_duration_s": 4.0,
+        "render_mode": "preserve",
+        "gain": 1.0,
+        "placement": "before",
+        "target_source_label": "",
+        "phase": "Inhale",
+        "gap_s": 0.0,
+        "sequence_order": 1,
+        "motion_mode": "stationary"
+      },
+      {
+        "label": "Exhale instruction",
+        "path": "assets/breathing/Exhale-2-3-4-hold_FIXED.wav",
+        "target_duration_s": 4.0,
+        "render_mode": "preserve",
+        "gain": 1.0,
+        "placement": "before",
+        "target_source_label": "",
+        "phase": "Exhale",
+        "gap_s": 0.0,
+        "sequence_order": 1,
+        "motion_mode": "stationary"
+      }
+    ],
+    "trajectory": {
+      "start_radius_m": 1.1,
+      "end_radius_m": 0.1,
+      "path_direction": "approach",
+      "path_length_m": 1.0,
+      "propagation_speed_mps": 0.3333333333333333,
+      "azimuth_start_deg": 0.0,
+      "azimuth_end_deg": 0.0,
+      "elevation_deg": 0.0,
+      "padding_pre_s": 0.5,
+      "padding_post_s": 0.5,
+      "sample_rate": 44100,
+      "use_inverse_square": true
+    },
+    "protocol": {
+      "repetitions_per_condition": 1,
+      "soa_values_ms": [300, 800, 1500, 2200, 2700],
+      "spatial_values_cm": [100.0, 83.3, 60.0, 36.7, 20.0],
+      "pair_spatial_values_with_soas": true,
+      "auditory_motion_directions": ["looming"],
+      "tactile_sites": ["hand"],
+      "catch_trial_percentage": 10.0,
+      "catch_trials_exact": null,
+      "include_baseline_trials": false,
+      "baseline_soa_values_ms": [],
+      "respiratory_phases": ["Inhale", "Exhale"],
+      "blocks": 6,
+      "block_specs": [
+        {
+          "label": "Block 1",
+          "stimulus_types": ["Audio-Tactile", "Catch"]
+        },
+        {
+          "label": "Block 2",
+          "stimulus_types": ["Audio-Tactile", "Catch"]
+        },
+        {
+          "label": "Block 3",
+          "stimulus_types": ["Audio-Tactile", "Catch"]
+        },
+        {
+          "label": "Block 4",
+          "stimulus_types": ["Audio-Tactile", "Catch"]
+        },
+        {
+          "label": "Block 5",
+          "stimulus_types": ["Audio-Tactile", "Catch"]
+        },
+        {
+          "label": "Block 6",
+          "stimulus_types": ["Audio-Tactile", "Catch"]
+        }
+      ],
+      "trial_strips": [
+        {
+          "strip_id": "study5-inhale-row",
+          "label": "Inhale row",
+          "elements": [
+            {
+              "element_id": "study5-inhale-instruction",
+              "kind": "fixed_audio",
+              "label": "Inhale instruction",
+              "source_label": "Inhale instruction",
+              "source_labels": [],
+              "randomized": false
+            },
+            {
+              "element_id": "study5-inhale-looming",
+              "kind": "looming_stimulus",
+              "label": "Looming Stimulus",
+              "source_label": "",
+              "source_labels": ["Pink frontal", "Blue frontal", "White frontal", "Brown frontal"],
+              "randomized": true
+            }
+          ]
+        },
+        {
+          "strip_id": "study5-exhale-row",
+          "label": "Exhale row",
+          "elements": [
+            {
+              "element_id": "study5-exhale-instruction",
+              "kind": "fixed_audio",
+              "label": "Exhale instruction",
+              "source_label": "Exhale instruction",
+              "source_labels": [],
+              "randomized": false
+            },
+            {
+              "element_id": "study5-exhale-looming",
+              "kind": "looming_stimulus",
+              "label": "Looming Stimulus",
+              "source_label": "",
+              "source_labels": ["Pink frontal", "Blue frontal", "White frontal", "Brown frontal"],
+              "randomized": true
+            }
+          ]
+        }
+      ],
+      "trial_randomization_strategy": "no_immediate_repeats",
+      "block_order_randomization": "counterbalanced_rotation",
+      "max_consecutive_same_trial_type": 2,
+      "participants": 50,
+      "random_seed": 20250604
+    }
+  },
+  "provenance": [
+    {
+      "field": "instruction assets",
+      "source": "Bundled owned Study 5 breathing instruction WAVs under assets/breathing; release audit and tests enforce 4.000 s at 44100 Hz."
+    },
+    {
+      "field": "visible trial assembly",
+      "source": "Local Study 5 dashboard workflow uses filmstrip rows: Inhale instruction | Looming Stimulus and Exhale instruction | Looming Stimulus."
+    },
+    {
+      "field": "trajectory and SOAs",
+      "source": "Study 5 toolkit defaults: 110 cm to 10 cm approach, 3 s movement inside a 4 s stimulus window, SOAs 300/800/1500/2200/2700 ms."
+    }
+  ]
+}

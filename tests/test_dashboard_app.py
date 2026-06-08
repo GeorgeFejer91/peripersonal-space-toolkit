@@ -183,6 +183,30 @@ def test_dashboard_pages_companion_contract(tmp_path: Path):
     assert health.headers["access-control-allow-origin"] == "https://georgefejer91.github.io"
 
 
+def test_dashboard_loads_unpublished_study5_preload_with_instruction_rows(tmp_path: Path):
+    client = _client(tmp_path)
+
+    loaded = client.post("/api/templates/study5_box_breathing_pps/load").json()
+    design = loaded["design"]
+
+    assert loaded["selected_template"] == "study5_box_breathing_pps"
+    assert design["study_profile_title"] == "Study 5 PPS box-breathing profile"
+    assert design["study_profile_reference_parameters"]["publication_status"] == "unpublished_lab_profile"
+    assert loaded["custom_workflow"]["is_custom"] is False
+    assert [clip["label"] for clip in design["prestimulus_files"]] == ["Inhale instruction", "Exhale instruction"]
+    assert [clip["target_duration_s"] for clip in design["prestimulus_files"]] == [4.0, 4.0]
+    assert all(clip["path"].startswith("assets/breathing/") for clip in design["prestimulus_files"])
+
+    strips = design["protocol"]["trial_strips"]
+    assert [strip["label"] for strip in strips] == ["Inhale row", "Exhale row"]
+    assert [strip["elements"][0]["source_label"] for strip in strips] == ["Inhale instruction", "Exhale instruction"]
+    assert all(strip["elements"][1]["randomized"] for strip in strips)
+    assert all(strip["elements"][1]["source_labels"] for strip in strips)
+    assert loaded["trial_preview"]
+    assert any("Inhale instruction | " in row["sequence"] for row in loaded["trial_preview"])
+    assert any("Exhale instruction | " in row["sequence"] for row in loaded["trial_preview"])
+
+
 def test_dashboard_state_templates_and_design_update(tmp_path: Path):
     client = _client(tmp_path)
 
