@@ -138,6 +138,18 @@ def rendered_wavs(render_dir: Path = DEFAULT_RENDER_DIR) -> list[RenderedWav]:
 def available_stimulus_wavs(design: StimulusDesign, render_dir: Path = DEFAULT_RENDER_DIR) -> list[RenderedWav]:
     wavs: list[RenderedWav] = []
     seen_paths: set[Path] = set()
+    for noise in design.noises:
+        path_text = getattr(noise, "prebaked_path", "")
+        if not path_text:
+            continue
+        path = _resolve_asset_path(path_text)
+        if not path.exists():
+            continue
+        resolved = path.resolve()
+        if resolved in seen_paths:
+            continue
+        wavs.append(_wav_info(path, label=noise.label))
+        seen_paths.add(resolved)
     for asset in design.custom_looming_files:
         path = _resolve_asset_path(asset.path)
         if not path.exists():
@@ -603,10 +615,19 @@ def _write_block_manifest(path: Path, rows: list[dict[str, Any]], participant_id
         "Trial_Strip_ID",
         "Trial_Strip_Label",
         "Trial_Strip_Index",
+        "Trial_Type_ID",
+        "Trial_Type_Label",
+        "Trial_Type_Index",
+        "Row_Audio_Tactile_Percent",
+        "Row_Catch_Percent",
+        "Row_Baseline_Percent",
         "Tactile_Enabled",
         "Sequence_Labels",
         "Fixed_Audio_Labels",
         "Fixed_Audio_Paths",
+        "Jitter_Labels",
+        "Jitter_Values_Ms",
+        "Jitter_Total_Ms",
         "Baseline_Strategy",
         "Baseline_Sample_Index",
         "Trial_Unit_Key",
@@ -635,10 +656,19 @@ def _write_block_manifest(path: Path, rows: list[dict[str, Any]], participant_id
                     "Trial_Strip_ID": row.get("trial_strip_id", ""),
                     "Trial_Strip_Label": row.get("trial_strip_label", ""),
                     "Trial_Strip_Index": row.get("trial_strip_index", ""),
+                    "Trial_Type_ID": row.get("trial_type_id", row.get("trial_strip_id", "")),
+                    "Trial_Type_Label": row.get("trial_type_label", row.get("trial_strip_label", "")),
+                    "Trial_Type_Index": row.get("trial_type_index", row.get("trial_strip_index", "")),
+                    "Row_Audio_Tactile_Percent": row.get("row_audio_tactile_percent", ""),
+                    "Row_Catch_Percent": row.get("row_catch_percent", ""),
+                    "Row_Baseline_Percent": row.get("row_baseline_percent", ""),
                     "Tactile_Enabled": row.get("tactile_enabled", ""),
                     "Sequence_Labels": row.get("sequence_labels", ""),
                     "Fixed_Audio_Labels": row.get("fixed_audio_labels", ""),
                     "Fixed_Audio_Paths": row.get("fixed_audio_paths", ""),
+                    "Jitter_Labels": row.get("jitter_labels", ""),
+                    "Jitter_Values_Ms": row.get("jitter_values_ms", ""),
+                    "Jitter_Total_Ms": row.get("jitter_total_ms", ""),
                     "Baseline_Strategy": row.get("baseline_strategy", ""),
                     "Baseline_Sample_Index": row.get("baseline_sample_index", ""),
                     "Trial_Unit_Key": row.get("trial_unit_key", ""),

@@ -1175,26 +1175,32 @@ function rowOrderText(index) {
 }
 
 function renderTrialStripElement(element, index) {
-  const sourceType = element.kind === "fixed_audio" ? "fixed_audio" : "looming_stimulus";
+  const sourceType = element.kind === "fixed_audio" || element.kind === "jitter"
+    ? element.kind
+    : "looming_stimulus";
   const card = document.createElement("div");
   card.className = `filmstrip-element sequence-event ${sourceType.replace("_", "-")} ${filmstripNoiseClass(element)}`;
   card.dataset.elementIndex = String(index);
   card.dataset.elementKind = sourceType;
-  card.innerHTML = sourceType === "fixed_audio"
-    ? renderFixedBlock(element)
-    : renderRandomizerBlock(element);
+  if (sourceType === "fixed_audio") {
+    card.innerHTML = renderFixedBlock(element);
+  } else if (sourceType === "jitter") {
+    card.innerHTML = renderJitterBlock(element);
+  } else {
+    card.innerHTML = renderRandomizerBlock(element);
+  }
   return card;
 }
 
 function renderAddEventControl(rowIndex, insertAfter, strip = {}, isEmpty = false) {
   const wrapper = document.createElement("div");
   wrapper.className = `sequence-event-add ${isEmpty ? "empty-row-add" : ""}`;
-  const hasRandomizer = (strip.elements || []).some((element) => element.kind === "looming_stimulus");
   wrapper.innerHTML = `
     <button type="button" class="sequence-event-add-symbol" title="Add sequence event" aria-label="Add sequence event">+</button>
     <div class="sequence-event-add-menu" aria-label="Add sequence event type">
       <button type="button" data-add-strip-element="fixed_audio" data-insert-after="${insertAfter}">Fixed</button>
-      <button type="button" data-add-strip-element="looming_stimulus" data-insert-after="${insertAfter}" ${hasRandomizer ? "disabled title=\"One randomizer event per row is supported for now.\"" : ""}>Randomizer</button>
+      <button type="button" data-add-strip-element="jitter" data-insert-after="${insertAfter}">Jitter</button>
+      <button type="button" data-add-strip-element="looming_stimulus" data-insert-after="${insertAfter}">Randomizer</button>
     </div>
   `;
   return wrapper;
@@ -1233,6 +1239,24 @@ function renderRandomizerBlock(element) {
   `;
 }
 
+function renderJitterBlock(element) {
+  const title = "Jitter event";
+  const values = formatList(element.jitter_values_ms || []);
+  return `
+    <div class="filmstrip-element-heading">
+      <span>${title}</span>
+      <button type="button" class="icon-action danger" data-remove-strip-element title="Remove event" aria-label="Remove event">x</button>
+    </div>
+    <div class="field-row">
+      <label>Jitter values ms</label>
+      <input data-element-field="jitter_values_ms" type="text" autocomplete="off" value="${escapeAttr(values)}" placeholder="500, 700, 1100, 2700">
+    </div>
+    <input data-element-field="label" type="hidden" value="${escapeAttr(element.label || title)}">
+    <input data-element-field="randomized" type="hidden" value="true">
+    <div class="sequence-event-note">Silent timing gap. Values are balanced across generated trials, not crossed with SOAs.</div>
+  `;
+}
+
 function normalizedRandomizerSelection(element = {}) {
   const allLabels = stimulusSourceDetailsFromDom().map((item) => item.label);
   const saved = (element.source_labels || []).filter(Boolean);
@@ -1256,6 +1280,7 @@ function randomizerSourceRows(selectedSet) {
 }
 
 function filmstripNoiseClass(element) {
+  if (element.kind === "jitter") return "jitter";
   const labels = element.source_labels || [];
   const firstLabel = labels[0] || element.source_label || "";
   const source = stimulusSourceDetailsFromDom().find((item) => item.label === firstLabel);
@@ -1310,18 +1335,24 @@ function collectTrialStrips() {
     const label = row.querySelector('[data-strip-field="label"]')?.value.trim() || `Trial type ${stripIndex + 1}`;
     const elements = [];
     for (const [elementIndex, card] of [...row.querySelectorAll(".filmstrip-element")].entries()) {
-      const kind = card.dataset.elementKind === "fixed_audio" ? "fixed_audio" : "looming_stimulus";
+      const kind = card.dataset.elementKind === "fixed_audio" || card.dataset.elementKind === "jitter"
+        ? card.dataset.elementKind
+        : "looming_stimulus";
       const item = {
         element_id: `row-${stripIndex + 1}-element-${elementIndex + 1}`,
         kind,
-        label: card.querySelector('[data-element-field="label"]')?.value.trim() || (kind === "fixed_audio" ? "Fixed audio clip" : "Looming Stimulus"),
+        label: card.querySelector('[data-element-field="label"]')?.value.trim() || (kind === "fixed_audio" ? "Fixed audio clip" : kind === "jitter" ? "Jitter event" : "Looming Stimulus"),
         source_label: "",
         source_labels: [],
+        jitter_values_ms: [],
         randomized: Boolean(card.querySelector('[data-element-field="randomized"]')?.checked),
       };
       if (kind === "fixed_audio") {
         item.source_label = card.querySelector('[data-element-field="source_label"]')?.value || "";
         item.label = item.source_label || item.label;
+      } else if (kind === "jitter") {
+        item.jitter_values_ms = parseIntegerList(card.querySelector('[data-element-field="jitter_values_ms"]')?.value).filter((value) => value >= 0);
+        item.randomized = true;
       } else {
         const checked = [...card.querySelectorAll('input[data-element-field="source_labels"]:checked')].map((input) => input.value);
         const selected = [...card.querySelectorAll('select[data-element-field="source_labels"] option:checked')].map((option) => option.value);
@@ -1427,6 +1458,17 @@ function defaultFilmstripElement(kind) {
       randomized: false,
     };
   }
+  if (kind === "jitter") {
+    return {
+      element_id: "",
+      kind: "jitter",
+      label: "Jitter event",
+      source_label: "",
+      source_labels: [],
+      jitter_values_ms: [500, 700, 1100, 2700],
+      randomized: true,
+    };
+  }
   return {
     element_id: "",
     kind: "looming_stimulus",
@@ -1442,10 +1484,6 @@ function addFilmstripElement(button, kind) {
   const stripIndex = Number(row?.dataset.stripIndex || -1);
   const strips = collectTrialStrips();
   if (!strips[stripIndex]) return;
-  if (kind === "looming_stimulus" && strips[stripIndex].elements.some((element) => element.kind === "looming_stimulus")) {
-    showToast("One randomizer event per row is supported for now.");
-    return;
-  }
   const insertAfter = Number(button.dataset.insertAfter ?? strips[stripIndex].elements.length);
   const index = Math.max(0, Math.min(strips[stripIndex].elements.length, insertAfter));
   strips[stripIndex].elements.splice(index, 0, defaultFilmstripElement(kind));

@@ -208,6 +208,11 @@ def test_dashboard_static_assets_are_packaged():
     assert ".trial-row-empty" in styles_css
     assert "Fixed event" in app_js
     assert "Randomizer event" in app_js
+    assert "Jitter event" in app_js
+    assert 'data-add-strip-element="jitter"' in app_js
+    assert "jitter_values_ms" in app_js
+    assert "Silent timing gap" in app_js
+    assert "One randomizer event per row" not in app_js
     assert "data-randomizer-soas" not in app_js
     assert "randomizer-count-row" not in app_js
     assert "randomizer-source-row" in app_js

@@ -961,6 +961,23 @@ def _trial_strip_preview_chunks(design: StimulusDesign, strip: Any, render_dir: 
                     "gain": asset.gain if asset is not None else 1.0,
                 }
             )
+        elif element.kind == "jitter":
+            values = []
+            for value in getattr(element, "jitter_values_ms", []) or []:
+                try:
+                    timing_ms = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if timing_ms >= 0:
+                    values.append(timing_ms)
+            selected_ms = random.choice(values) if values else 0
+            chunks.append(
+                {
+                    "kind": "jitter",
+                    "label": f"{element.label or 'Jitter'} ({selected_ms} ms)",
+                    "duration_s": selected_ms / 1000.0,
+                }
+            )
     return chunks
 
 
@@ -1003,6 +1020,12 @@ def _write_trial_strip_preview_wav(path: Path, chunks: list[dict[str, Any]]) -> 
     sample_rate = 0
     audio_chunks = []
     for chunk in chunks:
+        if chunk.get("kind") == "jitter":
+            if not sample_rate:
+                sample_rate = 44100
+            duration_s = max(0.0, float(chunk.get("duration_s", 0.0)))
+            audio_chunks.append(np.zeros((int(round(duration_s * sample_rate)), 2), dtype=np.float32))
+            continue
         source_path = Path(chunk["path"])
         if not source_path.exists():
             raise FileNotFoundError(f"Preview audio file was not found: {source_path}")

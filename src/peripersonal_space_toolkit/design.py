@@ -19,7 +19,7 @@ CUSTOM_AUDIO_NOISE_TYPE = "custom_audio"
 SUPPORTED_IMPORTED_AUDIO_RENDER_MODES = ("spatialize", "preserve")
 SUPPORTED_STIMULUS_SNIPPET_PLACEMENTS = ("before", "after")
 SUPPORTED_STIMULUS_MOTION_MODES = ("looming", "stationary")
-SUPPORTED_TRIAL_STRIP_ELEMENT_TYPES = ("fixed_audio", "looming_stimulus")
+SUPPORTED_TRIAL_STRIP_ELEMENT_TYPES = ("fixed_audio", "looming_stimulus", "jitter")
 SUPPORTED_DIRECTIONS = ("approach", "recede", "left_to_right", "right_to_left", "custom")
 SUPPORTED_COORDINATE_MODES = ("polar", "cartesian")
 SUPPORTED_TRIAL_TYPES = ("Audio-Tactile", "Baseline", "Catch")
@@ -43,6 +43,7 @@ class AudioFileSpec:
     path: str
     target_duration_s: float = 4.0
     render_mode: str = "preserve"
+    tone_type: str = ""
     gain: float = 1.0
     placement: str = "before"
     target_source_label: str = ""
@@ -50,6 +51,7 @@ class AudioFileSpec:
     gap_s: float = 0.0
     sequence_order: int = 0
     motion_mode: str = "looming"
+    trajectory_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -59,8 +61,10 @@ class NoiseDefinition:
     azimuth_deg: float = 0.0
     elevation_deg: float = 0.0
     gain: float = 1.0
+    prebaked_path: str = ""
     sequence_order: int = 0
     motion_mode: str = "looming"
+    trajectory_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,6 +80,7 @@ class TrialStripElementSpec:
     label: str = ""
     source_label: str = ""
     source_labels: list[str] = field(default_factory=list)
+    jitter_values_ms: list[int] = field(default_factory=list)
     randomized: bool = False
 
 
@@ -83,6 +88,9 @@ class TrialStripElementSpec:
 class TrialStripSpec:
     strip_id: str = ""
     label: str = ""
+    audio_tactile_percentage: float | None = None
+    catch_percentage: float | None = None
+    baseline_percentage: float | None = None
     elements: list[TrialStripElementSpec] = field(default_factory=list)
 
 
@@ -180,6 +188,15 @@ def _slug(value: str) -> str:
     return text or "item"
 
 
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _audio_file_specs_from_dicts(items: list[Any], *, default_motion_mode: str = "looming") -> list[AudioFileSpec]:
     specs: list[AudioFileSpec] = []
     for item in items:
@@ -206,6 +223,9 @@ def _trial_strip_specs_from_dicts(items: list[Any]) -> list[TrialStripSpec]:
             TrialStripSpec(
                 strip_id=str(item.get("strip_id") or f"strip-{strip_index}"),
                 label=str(item.get("label") or f"Row {strip_index}"),
+                audio_tactile_percentage=_optional_float(item.get("audio_tactile_percentage")),
+                catch_percentage=_optional_float(item.get("catch_percentage")),
+                baseline_percentage=_optional_float(item.get("baseline_percentage")),
                 elements=elements,
             )
         )
@@ -461,6 +481,22 @@ def validate_design(design: StimulusDesign) -> list[str]:
     fixed_audio_labels = {asset.label for asset in design.prestimulus_files if asset.label.strip()}
     for strip_index, strip in enumerate(p.trial_strips, start=1):
         strip_label = strip.label.strip() or f"Row {strip_index}"
+        if _strip_has_explicit_mix(strip):
+            for label, raw_value in (
+                ("audio-tactile", strip.audio_tactile_percentage),
+                ("catch", strip.catch_percentage),
+                ("baseline", strip.baseline_percentage),
+            ):
+                if raw_value is not None and not 0 <= raw_value <= 100:
+                    warnings.append(f"{strip_label} {label} percentage must be between 0 and 100.")
+            mix = _strip_mix_values(strip, p)
+            if mix["audio_tactile"] <= 0:
+                warnings.append(f"{strip_label} must keep audio-tactile percentage above 0% for row-based trial mixing.")
+            total_mix = mix["audio_tactile"] + mix["catch"] + mix["baseline"]
+            if not 99.5 <= total_mix <= 100.5:
+                warnings.append(f"{strip_label} row percentages should sum to 100%.")
+            if mix["baseline"] > 0 and _baseline_strategy(p) == "none":
+                warnings.append(f"{strip_label} baseline percentage requires an active baseline strategy.")
         if not strip.elements:
             warnings.append(f"{strip_label} must contain at least one filmstrip element.")
             continue
@@ -469,8 +505,8 @@ def validate_design(design: StimulusDesign) -> list[str]:
             for element in strip.elements
             if element.kind == "looming_stimulus" and element.randomized
         ]
-        if len(randomized_slots) != 1:
-            warnings.append(f"{strip_label} must contain exactly one randomized Looming Stimulus slot.")
+        if not randomized_slots:
+            warnings.append(f"{strip_label} must contain at least one randomized Randomizer event.")
         for element in strip.elements:
             if element.kind not in SUPPORTED_TRIAL_STRIP_ELEMENT_TYPES:
                 warnings.append(f"{strip_label} contains unsupported filmstrip element type: {element.kind}")
@@ -484,6 +520,8 @@ def validate_design(design: StimulusDesign) -> list[str]:
                 ]
                 if unknown_sources:
                     warnings.append(f"{strip_label} references unknown stimulus source(s): {', '.join(unknown_sources)}")
+            if element.kind == "jitter" and not _jitter_values_ms(element):
+                warnings.append(f"{strip_label} jitter event requires at least one non-negative timing value.")
     block_specs = effective_block_specs(p)
     if not block_specs:
         warnings.append("At least one block must be defined.")
@@ -498,10 +536,14 @@ def validate_design(design: StimulusDesign) -> list[str]:
     required_types = {"Audio-Tactile"}
     if p.include_baseline_trials:
         required_types.add("Baseline")
+    row_catch_required = any(_strip_has_explicit_mix(strip) and _strip_mix_values(strip, p)["catch"] > 0 for strip in p.trial_strips)
+    row_baseline_required = any(_strip_has_explicit_mix(strip) and _strip_mix_values(strip, p)["baseline"] > 0 for strip in p.trial_strips)
     if p.catch_trials_exact is not None and p.catch_trials_exact > 0:
         required_types.add("Catch")
-    elif p.catch_trial_percentage > 0:
+    elif p.catch_trial_percentage > 0 or row_catch_required:
         required_types.add("Catch")
+    if row_baseline_required:
+        required_types.add("Baseline")
     available_types = {stimulus_type for block in block_specs for stimulus_type in block.stimulus_types}
     missing_types = sorted(required_types - available_types)
     if missing_types:
@@ -599,6 +641,55 @@ def _select_baseline_rows(candidates: list[dict[str, Any]], target_count: int) -
     return selected
 
 
+def _bounded_percentage(value: float | None, fallback: float = 0.0) -> float:
+    try:
+        numeric = float(fallback if value is None else value)
+    except (TypeError, ValueError):
+        numeric = float(fallback)
+    return max(0.0, min(100.0, numeric))
+
+
+def _strip_has_explicit_mix(strip: TrialStripSpec) -> bool:
+    return any(
+        value is not None
+        for value in (
+            strip.audio_tactile_percentage,
+            strip.catch_percentage,
+            strip.baseline_percentage,
+        )
+    )
+
+
+def _strip_mix_values(strip: TrialStripSpec, protocol: ProtocolSpec) -> dict[str, float]:
+    catch = _bounded_percentage(strip.catch_percentage, protocol.catch_trial_percentage)
+    baseline_fallback = protocol.baseline_trial_percentage if _baseline_strategy(protocol) != "none" else 0.0
+    baseline = _bounded_percentage(strip.baseline_percentage, baseline_fallback)
+    if strip.audio_tactile_percentage is None:
+        audio_tactile = max(0.0, 100.0 - catch - baseline)
+    else:
+        audio_tactile = _bounded_percentage(strip.audio_tactile_percentage, 100.0)
+    return {
+        "audio_tactile": audio_tactile,
+        "catch": catch,
+        "baseline": baseline,
+    }
+
+
+def _strip_mix_metadata(strip: TrialStripSpec, protocol: ProtocolSpec) -> dict[str, float]:
+    mix = _strip_mix_values(strip, protocol)
+    return {
+        "row_audio_tactile_percent": mix["audio_tactile"],
+        "row_catch_percent": mix["catch"],
+        "row_baseline_percent": mix["baseline"],
+    }
+
+
+def _row_extra_count(reference_count: int, extra_percentage: float, audio_tactile_percentage: float) -> int:
+    if reference_count <= 0 or extra_percentage <= 0:
+        return 0
+    return int(math.ceil(reference_count * extra_percentage / max(0.1, audio_tactile_percentage)))
+
+
 def has_trial_strips(protocol: ProtocolSpec) -> bool:
     return any(strip.elements for strip in protocol.trial_strips)
 
@@ -611,6 +702,10 @@ def _strip_randomized_slot(strip: TrialStripSpec) -> TrialStripElementSpec | Non
         if element.kind == "looming_stimulus":
             return element
     return None
+
+
+def _strip_looming_events(strip: TrialStripSpec) -> list[TrialStripElementSpec]:
+    return [element for element in strip.elements if element.kind == "looming_stimulus"]
 
 
 def _source_by_label(design: StimulusDesign) -> dict[str, dict[str, Any]]:
@@ -643,13 +738,90 @@ def _strip_fixed_audio(strip: TrialStripSpec, design: StimulusDesign) -> list[Au
     return clips
 
 
-def _strip_sequence_labels(strip: TrialStripSpec, source_label: str) -> list[str]:
+def _jitter_values_ms(element: TrialStripElementSpec) -> list[int]:
+    values: list[int] = []
+    for value in element.jitter_values_ms:
+        try:
+            timing = int(value)
+        except (TypeError, ValueError):
+            continue
+        if timing >= 0:
+            values.append(timing)
+    return values
+
+
+def _strip_jitter_events(strip: TrialStripSpec) -> list[TrialStripElementSpec]:
+    return [element for element in strip.elements if element.kind == "jitter"]
+
+
+def _strip_jitter_assignment(strip: TrialStripSpec, sequence_index: int) -> tuple[int, ...]:
+    values: list[int] = []
+    for element in _strip_jitter_events(strip):
+        event_values = _jitter_values_ms(element) or [0]
+        values.append(event_values[sequence_index % len(event_values)])
+    return tuple(values)
+
+
+def _strip_source_assignment(
+    design: StimulusDesign,
+    strip: TrialStripSpec,
+    primary_source_label: str,
+    sequence_index: int,
+) -> tuple[str, ...]:
     labels: list[str] = []
+    for event_index, element in enumerate(_strip_looming_events(strip)):
+        if event_index == 0:
+            labels.append(primary_source_label or element.label or "Looming Stimulus")
+            continue
+        source_choices = [
+            str(source.get("label", ""))
+            for source in _strip_sources(design, element)
+            if str(source.get("label", "")).strip()
+        ]
+        labels.append(source_choices[sequence_index % len(source_choices)] if source_choices else primary_source_label)
+    return tuple(labels)
+
+
+def _jitter_metadata(strip: TrialStripSpec, jitter_values: tuple[int, ...]) -> dict[str, Any]:
+    events = _strip_jitter_events(strip)
+    if not events:
+        return {
+            "jitter_labels": "",
+            "jitter_values_ms": "",
+            "jitter_total_ms": "",
+        }
+    labels: list[str] = []
+    values: list[int] = []
+    for index, element in enumerate(events):
+        labels.append(element.label or "Jitter")
+        values.append(int(jitter_values[index]) if index < len(jitter_values) else 0)
+    return {
+        "jitter_labels": "; ".join(labels),
+        "jitter_values_ms": "; ".join(str(value) for value in values),
+        "jitter_total_ms": sum(values),
+    }
+
+
+def _strip_sequence_labels(
+    strip: TrialStripSpec,
+    source_label: str,
+    jitter_values: tuple[int, ...] = (),
+    source_labels: tuple[str, ...] = (),
+) -> list[str]:
+    labels: list[str] = []
+    jitter_index = 0
+    source_index = 0
     for element in strip.elements:
         if element.kind == "fixed_audio":
             labels.append(element.label or element.source_label or "Fixed audio")
         elif element.kind == "looming_stimulus":
-            labels.append(source_label or element.label or "Looming Stimulus")
+            label = source_labels[source_index] if source_index < len(source_labels) else source_label
+            labels.append(label or element.label or "Looming Stimulus")
+            source_index += 1
+        elif element.kind == "jitter":
+            timing = int(jitter_values[jitter_index]) if jitter_index < len(jitter_values) else 0
+            labels.append(f"{element.label or 'Jitter'} ({timing} ms)")
+            jitter_index += 1
     return labels
 
 
@@ -674,8 +846,11 @@ def _filmstrip_condition_rows_for_strip(
     fixed_paths = [clip.path for clip in fixed_clips]
     strip_id = strip.strip_id or f"strip-{strip_index}"
     strip_label = strip.label or f"Row {strip_index}"
+    trial_type_label = strip_label
+    row_mix = _strip_mix_metadata(strip, protocol)
     rows: list[dict[str, Any]] = []
     tactile_sites = protocol.tactile_sites or ["hand"]
+    jitter_sequence_index = 0
 
     for repetition in range(1, protocol.repetitions_per_condition + 1):
         for tactile_site in tactile_sites:
@@ -683,7 +858,15 @@ def _filmstrip_condition_rows_for_strip(
                 spatial_cm = _spatial_value_for_soa(protocol, soa_index)
                 for source in sources:
                     source_label = str(source.get("label", ""))
-                    sequence_labels = _strip_sequence_labels(strip, source_label)
+                    sequence_index = jitter_sequence_index
+                    jitter_values = _strip_jitter_assignment(strip, sequence_index)
+                    sequence_sources = _strip_source_assignment(design, strip, source_label, sequence_index)
+                    jitter_sequence_index += 1
+                    sequence_labels = _strip_sequence_labels(strip, source_label, jitter_values, sequence_sources)
+                    jitter_key = "_".join(str(value) for value in jitter_values)
+                    unit_key = f"{strip_id}_{source_label}_{soa_ms}_{repetition}"
+                    if jitter_key:
+                        unit_key = f"{unit_key}_jitter_{jitter_key}"
                     rows.append(
                         {
                             "trial_type": "Audio-Tactile",
@@ -700,11 +883,16 @@ def _filmstrip_condition_rows_for_strip(
                             "trial_strip_id": strip_id,
                             "trial_strip_label": strip_label,
                             "trial_strip_index": strip_index,
+                            "trial_type_id": strip_id,
+                            "trial_type_label": trial_type_label,
+                            "trial_type_index": strip_index,
+                            **row_mix,
                             "tactile_enabled": True,
                             "fixed_audio_labels": "; ".join(fixed_labels),
                             "fixed_audio_paths": "; ".join(fixed_paths),
+                            **_jitter_metadata(strip, jitter_values),
                             "sequence_labels": " | ".join(sequence_labels),
-                            "trial_unit_key": _slug(f"{strip_id}_{source_label}_{soa_ms}_{repetition}"),
+                            "trial_unit_key": _slug(unit_key),
                         }
                     )
     return rows
@@ -724,13 +912,26 @@ def _filmstrip_baseline_rows_for_strip(
     fixed_paths = [clip.path for clip in fixed_clips]
     strip_id = strip.strip_id or f"strip-{strip_index}"
     strip_label = strip.label or f"Event {strip_index}"
+    trial_type_label = strip_label
+    row_mix = _strip_mix_metadata(strip, protocol)
     rows: list[dict[str, Any]] = []
     tactile_sites = protocol.tactile_sites or ["hand"]
-    sequence_labels = fixed_labels + ["Baseline tactile"]
+    jitter_sequence_index = 0
 
     for repetition in range(1, protocol.repetitions_per_condition + 1):
         for tactile_site in tactile_sites:
             for soa_ms, spatial_cm in baseline_pairs:
+                sequence_index = jitter_sequence_index
+                jitter_values = _strip_jitter_assignment(strip, sequence_index)
+                baseline_sources = tuple("Baseline tactile" for _ in _strip_looming_events(strip))
+                jitter_sequence_index += 1
+                sequence_labels = _strip_sequence_labels(strip, "Baseline tactile", jitter_values, baseline_sources)
+                if "Baseline tactile" not in sequence_labels:
+                    sequence_labels.append("Baseline tactile")
+                jitter_key = "_".join(str(value) for value in jitter_values)
+                unit_key = f"{strip_id}_baseline_{soa_ms}_{repetition}"
+                if jitter_key:
+                    unit_key = f"{unit_key}_jitter_{jitter_key}"
                 rows.append(
                     {
                         "trial_type": "Baseline",
@@ -747,19 +948,31 @@ def _filmstrip_baseline_rows_for_strip(
                         "trial_strip_id": strip_id,
                         "trial_strip_label": strip_label,
                         "trial_strip_index": strip_index,
+                        "trial_type_id": strip_id,
+                        "trial_type_label": trial_type_label,
+                        "trial_type_index": strip_index,
+                        **row_mix,
                         "tactile_enabled": True,
                         "fixed_audio_labels": "; ".join(fixed_labels),
                         "fixed_audio_paths": "; ".join(fixed_paths),
+                        **_jitter_metadata(strip, jitter_values),
                         "sequence_labels": " | ".join(sequence_labels),
-                        "trial_unit_key": _slug(f"{strip_id}_baseline_{soa_ms}_{repetition}"),
+                        "trial_unit_key": _slug(unit_key),
                         "baseline_strategy": _baseline_strategy(protocol),
                     }
                 )
     return rows
 
 
-def _with_filmstrip_catches(rows: list[dict[str, Any]], protocol: ProtocolSpec) -> list[dict[str, Any]]:
-    if protocol.catch_trials_exact is not None:
+def _with_filmstrip_catches(
+    rows: list[dict[str, Any]],
+    protocol: ProtocolSpec,
+    strip: TrialStripSpec | None = None,
+) -> list[dict[str, Any]]:
+    if strip is not None and _strip_has_explicit_mix(strip):
+        mix = _strip_mix_values(strip, protocol)
+        catch_count = _row_extra_count(len(rows), mix["catch"], mix["audio_tactile"])
+    elif protocol.catch_trials_exact is not None:
         catch_count = protocol.catch_trials_exact
     elif protocol.catch_trial_percentage > 0:
         catch_count = int(math.ceil(len(rows) * protocol.catch_trial_percentage / (100.0 - protocol.catch_trial_percentage)))
@@ -778,6 +991,22 @@ def _with_filmstrip_catches(rows: list[dict[str, Any]], protocol: ProtocolSpec) 
     return with_catches
 
 
+def _row_baseline_target_count(
+    strip: TrialStripSpec,
+    protocol: ProtocolSpec,
+    reference_trial_count: int,
+    candidate_count: int,
+) -> int:
+    if not protocol.include_baseline_trials or _baseline_strategy(protocol) == "none":
+        return 0
+    if candidate_count <= 0:
+        return 0
+    if not _strip_has_explicit_mix(strip):
+        return baseline_target_count(protocol, reference_trial_count, candidate_count)
+    mix = _strip_mix_values(strip, protocol)
+    return _row_extra_count(reference_trial_count, mix["baseline"], mix["audio_tactile"])
+
+
 def _filmstrip_block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
     protocol = design.protocol
     scheduled: list[dict[str, Any]] = []
@@ -787,7 +1016,7 @@ def _filmstrip_block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
             continue
         strip_payloads: list[tuple[int, list[dict[str, Any]]]] = []
         baseline_candidates: list[dict[str, Any]] = []
-        block_audio_count = 0
+        legacy_baseline_audio_count = 0
         for strip_index, strip in enumerate(strips, start=1):
             audio_rows = (
                 _filmstrip_condition_rows_for_strip(design, strip, strip_index)
@@ -795,19 +1024,33 @@ def _filmstrip_block_trial_rows(design: StimulusDesign) -> list[dict[str, Any]]:
                 else []
             )
             rows = list(audio_rows) if "Audio-Tactile" in block.stimulus_types else []
-            block_audio_count += len(audio_rows)
             if "Catch" in block.stimulus_types:
                 rows.extend(
                     row
-                    for row in _with_filmstrip_catches(audio_rows, protocol)
+                    for row in _with_filmstrip_catches(audio_rows, protocol, strip)
                     if row.get("trial_type") == "Catch"
                 )
             if "Baseline" in block.stimulus_types:
-                baseline_candidates.extend(_filmstrip_baseline_rows_for_strip(design, strip, strip_index))
+                strip_baseline_candidates = _filmstrip_baseline_rows_for_strip(design, strip, strip_index)
+                if _strip_has_explicit_mix(strip):
+                    rows.extend(
+                        _select_baseline_rows(
+                            strip_baseline_candidates,
+                            _row_baseline_target_count(
+                                strip,
+                                protocol,
+                                len(audio_rows),
+                                len(strip_baseline_candidates),
+                            ),
+                        )
+                    )
+                else:
+                    baseline_candidates.extend(strip_baseline_candidates)
+                    legacy_baseline_audio_count += len(audio_rows)
             strip_payloads.append((strip_index, rows))
         selected_baselines = _select_baseline_rows(
             baseline_candidates,
-            baseline_target_count(protocol, block_audio_count, len(baseline_candidates)),
+            baseline_target_count(protocol, legacy_baseline_audio_count, len(baseline_candidates)),
         )
         baselines_by_strip: dict[int, list[dict[str, Any]]] = {}
         for row in selected_baselines:
@@ -939,6 +1182,7 @@ def protocol_sound_sources(design: StimulusDesign) -> list[dict[str, Any]]:
         {
             "label": asset.label,
             "noise_type": CUSTOM_AUDIO_NOISE_TYPE,
+            "tone_type": asset.tone_type,
             "azimuth_deg": "",
             "elevation_deg": "",
             "gain": asset.gain,
@@ -949,6 +1193,7 @@ def protocol_sound_sources(design: StimulusDesign) -> list[dict[str, Any]]:
             "target_source_label": asset.target_source_label,
             "phase": asset.phase,
             "gap_s": asset.gap_s,
+            "trajectory_snapshot": dict(asset.trajectory_snapshot),
         }
         for asset in design.custom_looming_files
         if asset.label.strip() or asset.path.strip()
@@ -960,9 +1205,14 @@ def _sound_source_from_noise(noise: NoiseDefinition) -> dict[str, Any]:
     return {
         "label": noise.label,
         "noise_type": noise.noise_type,
+        "tone_type": noise.noise_type,
         "azimuth_deg": noise.azimuth_deg,
         "elevation_deg": noise.elevation_deg,
         "gain": noise.gain,
+        "source_path": noise.prebaked_path,
+        "prebaked_path": noise.prebaked_path,
+        "source_kind": "procedural_noise",
+        "trajectory_snapshot": dict(noise.trajectory_snapshot),
     }
 
 
@@ -1197,9 +1447,18 @@ def export_protocol_csv(design: StimulusDesign, path: Path) -> None:
         "trial_strip_id",
         "trial_strip_label",
         "trial_strip_index",
+        "trial_type_id",
+        "trial_type_label",
+        "trial_type_index",
+        "row_audio_tactile_percent",
+        "row_catch_percent",
+        "row_baseline_percent",
         "tactile_enabled",
         "fixed_audio_labels",
         "fixed_audio_paths",
+        "jitter_labels",
+        "jitter_values_ms",
+        "jitter_total_ms",
         "sequence_labels",
         "baseline_strategy",
         "baseline_sample_index",

@@ -994,12 +994,18 @@ select:focus {
   background: #eef7f3;
 }
 
+.filmstrip-element.jitter {
+  border-color: #d8c98f;
+  background: #fbf8eb;
+}
+
 .filmstrip-element.noise-pink { border-left: 5px solid #d783b5; }
 .filmstrip-element.noise-blue { border-left: 5px solid #4b7fc4; }
 .filmstrip-element.noise-white { border-left: 5px solid #d8dde2; }
 .filmstrip-element.noise-brown { border-left: 5px solid #8b623f; }
 .filmstrip-element.noise-violet { border-left: 5px solid #8364b9; }
 .filmstrip-element.noise-custom_audio { border-left: 5px solid #246b55; }
+.filmstrip-element.jitter { border-left: 5px solid #b7a452; }
 
 .filmstrip-element-heading {
   display: flex;
