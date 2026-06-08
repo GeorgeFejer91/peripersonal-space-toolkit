@@ -69,6 +69,7 @@ def _client(tmp_path: Path) -> TestClient:
         render_dir=_render_dir(tmp_path),
         session_root=tmp_path / "sessions",
         import_dir=tmp_path / "imports",
+        preview_dir=tmp_path / "previews",
     )
     return TestClient(create_app(controller))
 
@@ -135,6 +136,10 @@ def test_dashboard_static_assets_are_packaged():
     assert "Already Looming / Control" in html
     assert "Instruction Snippet" in html
     assert "/api/stimulus/bake" in app_js
+    assert "/api/trials/preview-row" in app_js
+    assert "data-preview-strip" in app_js
+    assert "filmstrip-preview-button" in app_js
+    assert "previewFilmstripRow" in app_js
     assert "renderPreloadAssetStatus" in app_js
     assert "/api/local/open-folder" in app_js
     assert "data-open-folder" in app_js
@@ -230,6 +235,34 @@ def test_dashboard_loads_unpublished_study5_preload_with_instruction_rows(tmp_pa
     assert loaded["trial_preview"]
     assert any("Inhale instruction | " in row["sequence"] for row in loaded["trial_preview"])
     assert any("Exhale instruction | " in row["sequence"] for row in loaded["trial_preview"])
+
+
+def test_dashboard_previews_study5_filmstrip_row_audio_locally(tmp_path: Path):
+    client = _client(tmp_path)
+    loaded = client.post("/api/templates/study5_box_breathing_pps/load").json()
+
+    preview = client.post(
+        "/api/trials/preview-row",
+        json={
+            "participant_id": "P001",
+            "strip_index": 0,
+            "design": loaded["design"],
+        },
+    ).json()
+
+    assert preview["local_only"] is True
+    assert preview["auditory_preview_only"] is True
+    assert preview["sequence"][0] == "Inhale instruction"
+    assert preview["selected_source_label"] in loaded["design"]["protocol"]["trial_strips"][0]["elements"][1]["source_labels"]
+    assert preview["url"].startswith("/api/trial-row-previews/")
+    preview_path = Path(preview["path"])
+    assert preview_path.exists()
+    assert preview_path.parent == tmp_path / "previews"
+    info = sf.info(str(preview_path))
+    assert info.channels == 2
+    assert info.samplerate == 44100
+    assert info.frames / info.samplerate == pytest.approx(8.0)
+    assert client.get(preview["url"]).status_code == 200
 
 
 def test_dashboard_state_templates_and_design_update(tmp_path: Path):
@@ -459,6 +492,11 @@ def test_dashboard_open_folder_is_local_backend_action(tmp_path: Path, monkeypat
     assert opened["local_only"] is True
     assert opened["folder"] == str(wav_path.parent.resolve())
     assert calls
+
+    preload_path = dashboard_app.REPO_ROOT / "assets" / "preloads" / "study5_box_breathing_pps" / "looming_Pink_frontal.wav"
+    opened_preload = client.post("/api/local/open-folder", json={"path": str(preload_path)}).json()
+    assert opened_preload["local_only"] is True
+    assert opened_preload["folder"] == str(preload_path.parent.resolve())
 
 
 def test_custom_audio_render_mode_reaches_render_config(tmp_path: Path):

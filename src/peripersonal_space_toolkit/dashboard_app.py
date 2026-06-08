@@ -7,6 +7,7 @@ import base64
 import binascii
 import json
 import math
+import random
 import re
 import subprocess
 import sys
@@ -67,6 +68,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DESIGN_PATH = REPO_ROOT / "configs" / "stimulus_design.generated.json"
 TEMPLATE_DIR = REPO_ROOT / "study_templates"
 DEFAULT_IMPORT_DIR = REPO_ROOT / "local_data" / "dashboard_audio"
+DEFAULT_PREVIEW_DIR = REPO_ROOT / "local_data" / "dashboard_previews"
 TRIAL_PREVIEW_LIMIT = 240
 CUSTOM_TEMPLATE_IDS = {"custom", "__custom__"}
 DEFAULT_WEB_ORIGINS = ("https://georgefejer91.github.io",)
@@ -131,12 +133,14 @@ class DashboardController:
         session_root: Path = DEFAULT_SESSION_ROOT,
         template_dir: Path = TEMPLATE_DIR,
         import_dir: Path = DEFAULT_IMPORT_DIR,
+        preview_dir: Path = DEFAULT_PREVIEW_DIR,
     ) -> None:
         self.design_path = Path(design_path)
         self.render_dir = Path(render_dir)
         self.session_root = Path(session_root)
         self.template_dir = Path(template_dir)
         self.import_dir = Path(import_dir)
+        self.preview_dir = Path(preview_dir)
         self.templates = load_templates(self.template_dir)
         self.preload_inventory = load_preload_inventory(REPO_ROOT)
         self.design = self._load_initial_design()
@@ -428,6 +432,29 @@ class DashboardController:
             "message": "Stored by the local companion backend; no online upload was performed.",
         }
 
+    def preview_trial_strip_audio(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if "design" in payload:
+            design = design_from_dict(dict(payload["design"]))
+        else:
+            with self._lock:
+                design = _copy_design(self.design)
+        if "trajectory_controls" in payload:
+            design = _apply_trajectory_controls(design, dict(payload["trajectory_controls"]))
+
+        strips = [strip for strip in design.protocol.trial_strips if strip.elements]
+        if not strips:
+            raise ValueError("Create a filmstrip row before previewing audio.")
+        strip_index = max(0, int(_float(payload.get("strip_index"), 0)))
+        if strip_index >= len(strips):
+            raise ValueError("The requested filmstrip row does not exist.")
+        return _trial_strip_audio_preview(
+            design,
+            strips[strip_index],
+            strip_index=strip_index,
+            render_dir=self.render_dir,
+            preview_dir=self.preview_dir,
+        )
+
     def open_local_folder(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw_path = str(payload.get("path") or "").strip()
         if not raw_path:
@@ -441,6 +468,7 @@ class DashboardController:
             self.import_dir.resolve(),
             self.session_root.resolve(),
             self.design_path.resolve().parent,
+            (REPO_ROOT / "assets" / "preloads").resolve(),
         ]
         if not any(target == root or root in target.parents for root in allowed_roots):
             raise ValueError("Local folder opening is limited to dashboard-managed folders.")
@@ -551,6 +579,8 @@ def create_app(
 
     app.mount("/dashboard", StaticFiles(directory=str(dashboard_dir)), name="dashboard")
     app.mount("/viewer", StaticFiles(directory=str(viewer_dir)), name="viewer")
+    controller.preview_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/api/trial-row-previews", StaticFiles(directory=str(controller.preview_dir)), name="trial_row_previews")
 
     @app.get("/api/state")
     def api_state() -> dict[str, Any]:
@@ -623,6 +653,13 @@ def create_app(
     def api_audio_import(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
         try:
             return controller.import_audio_source(payload)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/trials/preview-row")
+    def api_preview_trial_row(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+        try:
+            return controller.preview_trial_strip_audio(payload)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -752,6 +789,134 @@ def _render_status(render_dir: Path, design: StimulusDesign | None = None) -> di
         "wav_count": len(wavs),
         "wavs": [_json_ready(asdict(wav)) for wav in wavs],
     }
+
+
+def _trial_strip_audio_preview(
+    design: StimulusDesign,
+    strip: Any,
+    *,
+    strip_index: int,
+    render_dir: Path,
+    preview_dir: Path,
+) -> dict[str, Any]:
+    chunks = _trial_strip_preview_chunks(design, strip, render_dir)
+    if not chunks:
+        raise ValueError("This filmstrip row has no playable audio elements.")
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / f"row_{strip_index + 1}_{_slug(strip.label or 'filmstrip')}_{uuid.uuid4().hex[:8]}.wav"
+    duration_s = _write_trial_strip_preview_wav(preview_path, chunks)
+    return {
+        "url": f"/api/trial-row-previews/{preview_path.name}",
+        "path": str(preview_path),
+        "row_label": strip.label or f"Row {strip_index + 1}",
+        "sequence": [chunk["label"] for chunk in chunks],
+        "selected_source_label": next((chunk["label"] for chunk in chunks if chunk["kind"] == "looming_stimulus"), ""),
+        "duration_s": duration_s,
+        "local_only": True,
+        "auditory_preview_only": True,
+        "message": "Temporary browser-playable row preview assembled by the local companion backend.",
+    }
+
+
+def _trial_strip_preview_chunks(design: StimulusDesign, strip: Any, render_dir: Path) -> list[dict[str, Any]]:
+    fixed = {asset.label: asset for asset in design.prestimulus_files if asset.label.strip()}
+    source_assets = {asset.label: asset for asset in design.custom_looming_files if asset.label.strip()}
+    source_wavs = _stimulus_wav_lookup(design, render_dir)
+    chunks: list[dict[str, Any]] = []
+    for element in strip.elements:
+        if element.kind == "fixed_audio":
+            asset = fixed.get(element.source_label)
+            if asset is None:
+                raise ValueError(f"Filmstrip row references an unknown fixed clip: {element.source_label}")
+            chunks.append(
+                {
+                    "kind": "fixed_audio",
+                    "label": asset.label,
+                    "path": _resolve_dashboard_local_path(asset.path),
+                    "gain": asset.gain,
+                }
+            )
+        elif element.kind == "looming_stimulus":
+            labels = [label for label in element.source_labels if label] or list(source_wavs)
+            playable = [(label, _source_key(label)) for label in labels if _source_key(label) in source_wavs]
+            if not playable:
+                raise ValueError("Bake or render at least one selected looming source before previewing this row.")
+            selected, selected_key = random.choice(playable)
+            asset = source_assets.get(selected)
+            chunks.append(
+                {
+                    "kind": "looming_stimulus",
+                    "label": selected,
+                    "path": source_wavs[selected_key],
+                    "gain": asset.gain if asset is not None else 1.0,
+                }
+            )
+    return chunks
+
+
+def _stimulus_wav_lookup(design: StimulusDesign, render_dir: Path) -> dict[str, Path]:
+    lookup: dict[str, Path] = {}
+    for wav in available_stimulus_wavs(design, render_dir):
+        keys = {
+            wav.label,
+            wav.path.stem,
+            wav.path.name,
+            wav.path.stem.replace("looming_", ""),
+            _slug(wav.label).replace("_", " "),
+        }
+        for key in keys:
+            normalized = _source_key(key)
+            if normalized and normalized not in lookup:
+                lookup[normalized] = wav.path
+    return lookup
+
+
+def _source_key(value: str) -> str:
+    return str(value or "").replace("_", " ").replace("-", " ").strip().lower()
+
+
+def _resolve_dashboard_local_path(value: str | Path) -> Path:
+    path = Path(str(value)).expanduser()
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
+
+
+def _write_trial_strip_preview_wav(path: Path, chunks: list[dict[str, Any]]) -> float:
+    try:
+        import numpy as np
+        import soundfile as sf
+        from scipy import signal
+    except ImportError as exc:
+        raise RuntimeError("Install numpy, scipy, and soundfile to preview filmstrip rows.") from exc
+
+    sample_rate = 0
+    audio_chunks = []
+    for chunk in chunks:
+        source_path = Path(chunk["path"])
+        if not source_path.exists():
+            raise FileNotFoundError(f"Preview audio file was not found: {source_path}")
+        data, rate = sf.read(str(source_path), dtype="float32", always_2d=True)
+        if data.shape[1] == 1:
+            data = np.repeat(data, 2, axis=1)
+        elif data.shape[1] > 2:
+            data = data[:, :2]
+        if not sample_rate:
+            sample_rate = int(rate)
+        elif int(rate) != sample_rate:
+            divisor = math.gcd(sample_rate, int(rate))
+            data = signal.resample_poly(data, sample_rate // divisor, int(rate) // divisor, axis=0)
+        gain = max(0.0, float(chunk.get("gain", 1.0)))
+        audio_chunks.append(data * gain)
+
+    if not audio_chunks or not sample_rate:
+        raise ValueError("No audio data was available for this filmstrip row.")
+    preview = np.concatenate(audio_chunks, axis=0)
+    peak = float(np.max(np.abs(preview))) if preview.size else 0.0
+    if peak > 0.99:
+        preview = preview / peak * 0.99
+    sf.write(str(path), preview, sample_rate, subtype="PCM_16")
+    return float(preview.shape[0] / sample_rate)
 
 
 def _bake_recipe_label(recipe: dict[str, Any]) -> str:

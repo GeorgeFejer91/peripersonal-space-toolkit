@@ -59,6 +59,7 @@ let apiBase = "";
 let templateLoadInFlight = false;
 let pendingAudioImportMode = "preserve";
 let pendingBakeRecipe = null;
+let activeTrialRowPreviewAudio = null;
 
 async function api(path, options = {}) {
   let response;
@@ -589,6 +590,7 @@ function renderTrialStripRow(strip, index) {
   row.dataset.stripIndex = String(index);
   row.innerHTML = `
     <div class="filmstrip-row-header">
+      <button type="button" class="filmstrip-preview-button" data-preview-strip="${index}" title="Prelisten row" aria-label="Prelisten row">&#9658;</button>
       <div class="field-row">
         <label>Row label</label>
         <input data-strip-field="label" value="${escapeAttr(strip.label || `Row ${index + 1}`)}">
@@ -732,6 +734,41 @@ function updateFilmstripCounts() {
     const sourceCount = selected || stimulusSourceDetailsFromDom().length;
     const total = sourceCount * Math.max(soaCount, 0) * repetitions;
     count.textContent = `${sourceCount} stimuli x ${soaCount} SOAs x ${repetitions} reps = ${total} trials/block`;
+  }
+}
+
+async function previewFilmstripRow(button) {
+  const row = button.closest(".filmstrip-row");
+  if (!row) return;
+  state.design.protocol = state.design.protocol || {};
+  state.design.protocol.trial_strips = collectTrialStrips();
+  const payload = collectPayload();
+  payload.strip_index = Number(row.dataset.stripIndex || 0);
+  button.disabled = true;
+  button.classList.add("playing");
+  let started = false;
+  try {
+    const preview = await api("/api/trials/preview-row", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    if (activeTrialRowPreviewAudio) {
+      activeTrialRowPreviewAudio.pause();
+      activeTrialRowPreviewAudio = null;
+    }
+    const audio = new Audio(apiUrl(`${preview.url}?v=${Date.now()}`));
+    activeTrialRowPreviewAudio = audio;
+    audio.addEventListener("ended", () => button.classList.remove("playing"), { once: true });
+    audio.addEventListener("pause", () => button.classList.remove("playing"), { once: true });
+    await audio.play();
+    started = true;
+    showToast(`Preview: ${preview.sequence.join(" | ")}`);
+  } catch (error) {
+    button.classList.remove("playing");
+    throw error;
+  } finally {
+    if (!started) button.classList.remove("playing");
+    button.disabled = false;
   }
 }
 
@@ -1729,6 +1766,11 @@ function wireEvents() {
     updateViewer();
   });
   document.addEventListener("click", (event) => {
+    const previewButton = event.target.closest?.("[data-preview-strip]");
+    if (previewButton) {
+      previewFilmstripRow(previewButton).catch(reportError);
+      return;
+    }
     if (event.target.matches("[data-open-folder]")) {
       openLocalFolder(event.target.dataset.openFolder).catch(reportError);
       return;

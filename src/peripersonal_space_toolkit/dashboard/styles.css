@@ -682,10 +682,29 @@ select:focus {
 
 .filmstrip-row-header {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto;
+  grid-template-columns: 34px minmax(120px, 1fr) auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
+}
+
+.filmstrip-preview-button {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-color: #b9cdc4;
+  background: #eef7f3;
+  color: var(--primary);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.filmstrip-preview-button.playing {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
 }
 
 .filmstrip-row-actions,
