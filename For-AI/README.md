@@ -30,7 +30,8 @@ Every future AI agent should:
 
 1. Read this folder before planning or editing.
 2. Check whether the current chat changed aims, scope, GUI behavior, data schemas, runner behavior, tests, publication boundaries, or repo structure.
-3. Update the relevant `For-AI/` files before finalizing substantive work.
-4. State in the final response whether `For-AI/` was updated or why no update was needed.
+3. When changing the HTML dashboard, keep the packaged local dashboard and the online/static GitHub Pages dashboard synchronized in the same change set; update and verify both before finalizing.
+4. Update the relevant `For-AI/` files before finalizing substantive work.
+5. State in the final response whether `For-AI/` was updated or why no update was needed.
 
 Do not put secrets, participant data, generated artifacts, local absolute paths, or private notes in this folder.

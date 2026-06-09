@@ -11,6 +11,8 @@ Use this workflow to change a browser-based GUI that is an orchestrator for loca
 
 Keep the browser UI as a decision surface only. Do not move validated timing, stimulus rendering, file storage, participant data, audio stress, session preparation, or native Focus Mode execution into browser JavaScript.
 
+Treat the packaged local dashboard and the online/static GitHub Pages dashboard as one synchronized interface. Every HTML/CSS/JS dashboard change must update and verify both surfaces in the same change set; do not leave the online page behind the local UI or the local UI behind the online page.
+
 In this repo:
 
 - Dashboard assets live in `src/peripersonal_space_toolkit/dashboard/`.
