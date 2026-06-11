@@ -172,7 +172,8 @@ code {
   cursor: default;
 }
 
-.rail nav a strong {
+.rail nav a .decision-state {
+  width: 24px;
   min-width: 24px;
   height: 22px;
   display: inline-flex;
@@ -182,19 +183,27 @@ code {
   border-radius: 6px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
 }
 
-.rail nav a.complete strong {
+.rail nav a .decision-state.ready {
   background: var(--ok-bg);
-  color: var(--primary);
-  border-color: #c4dfd3;
+  color: #17634f;
+  border-color: #9fd0bd;
 }
 
-.rail nav a.current strong {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #ffffff;
+.rail nav a .decision-state.not-ready {
+  background: #f8e1df;
+  color: #a63831;
+  border-color: #e3aca7;
+}
+
+.rail nav a.locked .decision-state.not-ready {
+  background: #f2e7e4;
+  color: #9f4a43;
+  border-color: #dfb9b4;
 }
 
 .companion-panel {

@@ -1596,10 +1596,19 @@ function renderWorkflow() {
       link.classList.toggle("locked", locked);
       link.classList.toggle("current", current);
       link.classList.toggle("complete", complete);
+      link.classList.toggle("not-ready", !complete);
       link.setAttribute("aria-disabled", String(locked));
     }
     if (stateLabel) {
-      stateLabel.textContent = complete ? "ok" : String(index + 1);
+      const label = step.label || humanize(stepId);
+      const missing = Array.isArray(step.missing) && step.missing.length
+        ? `: ${step.missing.join(" ")}`
+        : "";
+      const status = complete ? "ready" : "not ready";
+      stateLabel.textContent = complete ? "\u2713" : "X";
+      stateLabel.className = `decision-state ${complete ? "ready" : "not-ready"}`;
+      stateLabel.title = `${label} ${status}${missing}`;
+      stateLabel.setAttribute("aria-label", `${label} ${status}`);
     }
     for (const badge of badges) {
       badge.textContent = locked ? "locked" : complete ? "ready" : "required";
